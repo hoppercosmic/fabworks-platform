@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { scanPage, dashboardPage } from "./ui";
+import { scanPage, dashboardPage, newJobPage } from "./ui";
 
 type Bindings = {
   DB: D1Database;
@@ -140,7 +140,23 @@ app.post("/api/scan", async (c) => {
   );
 });
 
+app.get("/api/scans/recent", async (c) => {
+  const limit = Math.min(parseInt(c.req.query("limit") || "25"), 100);
+  const result = await c.env.DB.prepare(
+    `SELECT s.id, s.scanned_by, s.note, s.scanned_at,
+            j.job_number, j.job_name,
+            st.slug as station, st.name as station_name
+     FROM scans s
+     JOIN jobs j ON s.job_id = j.id
+     JOIN stations st ON s.station_id = st.id
+     ORDER BY s.scanned_at DESC
+     LIMIT ?`
+  ).bind(limit).all();
+  return c.json(result.results);
+});
+
 app.get("/", (c) => c.html(scanPage));
+app.get("/jobs/new", (c) => c.html(newJobPage));
 app.get("/dashboard", (c) => c.html(dashboardPage));
 
 export default app;

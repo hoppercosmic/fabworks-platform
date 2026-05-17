@@ -34,6 +34,7 @@ export const scanPage = `<!DOCTYPE html>
       justify-content: space-between;
     }
     header h1 { font-size: 1.25rem; font-weight: 700; }
+    header nav { display: flex; gap: 16px; }
     header a {
       color: var(--muted);
       text-decoration: none;
@@ -185,7 +186,10 @@ export const scanPage = `<!DOCTYPE html>
 <body>
   <header>
     <h1>FabWorks</h1>
-    <a href="/dashboard">Dashboard</a>
+    <nav>
+      <a href="/jobs/new">+ Job</a>
+      <a href="/dashboard">Dashboard</a>
+    </nav>
   </header>
 
   <main>
@@ -400,6 +404,7 @@ export const dashboardPage = `<!DOCTYPE html>
       justify-content: space-between;
     }
     header h1 { font-size: 1.25rem; font-weight: 700; }
+    header nav { display: flex; gap: 16px; }
     header a {
       color: var(--muted);
       text-decoration: none;
@@ -410,6 +415,39 @@ export const dashboardPage = `<!DOCTYPE html>
       max-width: 960px;
       margin: 0 auto;
     }
+    .two-col {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 16px;
+      align-items: start;
+    }
+    @media (max-width: 768px) {
+      .two-col { grid-template-columns: 1fr; }
+    }
+    .feed-panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+      max-height: 80vh;
+      overflow-y: auto;
+    }
+    .feed-panel h3 {
+      font-size: 0.8rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 10px;
+    }
+    .feed-item {
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.8rem;
+    }
+    .feed-item:last-child { border-bottom: none; }
+    .feed-job { font-weight: 600; color: var(--text); }
+    .feed-station { color: var(--accent); }
+    .feed-meta { color: var(--muted); font-size: 0.7rem; margin-top: 2px; }
     .refresh-row {
       display: flex;
       justify-content: space-between;
@@ -498,7 +536,10 @@ export const dashboardPage = `<!DOCTYPE html>
 <body>
   <header>
     <h1>FabWorks Dashboard</h1>
-    <a href="/">Scan</a>
+    <nav>
+      <a href="/">Scan</a>
+      <a href="/jobs/new">+ Job</a>
+    </nav>
   </header>
 
   <main>
@@ -509,26 +550,54 @@ export const dashboardPage = `<!DOCTYPE html>
         <button class="refresh-btn" id="refresh-btn">Refresh</button>
       </div>
     </div>
-    <div id="jobs"></div>
+    <div class="two-col">
+      <div id="jobs"></div>
+      <div class="feed-panel">
+        <h3>Live Feed</h3>
+        <div id="feed"></div>
+      </div>
+    </div>
   </main>
 
   <script>
     const jobsDiv = document.getElementById('jobs');
+    const feedDiv = document.getElementById('feed');
     const updatedSpan = document.getElementById('updated');
     const refreshBtn = document.getElementById('refresh-btn');
     const autoCheck = document.getElementById('auto-refresh');
     let stations = [];
     let autoTimer = null;
 
+    function timeAgo(date) {
+      const s = Math.floor((Date.now() - date.getTime()) / 1000);
+      if (s < 60) return 'just now';
+      if (s < 3600) return Math.floor(s / 60) + 'm ago';
+      if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+      return Math.floor(s / 86400) + 'd ago';
+    }
+
     async function load() {
-      const [stRes, jRes] = await Promise.all([
+      const [stRes, jRes, feedRes] = await Promise.all([
         fetch('/api/stations').then(r => r.json()),
         fetch('/api/jobs?status=active').then(r => r.json()),
+        fetch('/api/scans/recent?limit=20').then(r => r.json()),
       ]);
       stations = stRes;
 
+      feedDiv.innerHTML = feedRes.length === 0
+        ? '<div style="color:var(--muted);font-size:0.8rem">No scans yet</div>'
+        : feedRes.map(s => {
+          const t = new Date(s.scanned_at + 'Z');
+          const ago = timeAgo(t);
+          return '<div class="feed-item">' +
+            '<span class="feed-job">' + s.job_number + '</span> ' +
+            '<span class="feed-station">' + s.station_name + '</span>' +
+            '<div class="feed-meta">' + (s.scanned_by || '?') + ' — ' + ago + '</div>' +
+          '</div>';
+        }).join('');
+
       if (jRes.length === 0) {
-        jobsDiv.innerHTML = '<div class="empty">No active jobs. Create one from the API or scan UI.</div>';
+        jobsDiv.innerHTML = '<div class="empty">No active jobs. <a href="/jobs/new" style="color:var(--accent)">Create one</a></div>';
         updatedSpan.textContent = 'Updated ' + new Date().toLocaleTimeString();
         return;
       }
@@ -581,6 +650,297 @@ export const dashboardPage = `<!DOCTYPE html>
     refreshBtn.addEventListener('click', load);
     load();
     startAuto();
+  </script>
+</body>
+</html>`;
+
+export const newJobPage = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>FabWorks — New Job</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f172a;
+      --surface: #1e293b;
+      --border: #334155;
+      --text: #f1f5f9;
+      --muted: #94a3b8;
+      --accent: #3b82f6;
+      --success: #22c55e;
+      --error: #ef4444;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    header h1 { font-size: 1.25rem; font-weight: 700; }
+    header nav { display: flex; gap: 16px; }
+    header a { color: var(--muted); text-decoration: none; font-size: 0.875rem; }
+    main {
+      flex: 1;
+      padding: 16px;
+      max-width: 480px;
+      width: 100%;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+    }
+    label {
+      display: block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 6px;
+    }
+    input[type="text"] {
+      width: 100%;
+      padding: 12px;
+      font-size: 1.125rem;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      outline: none;
+    }
+    input[type="text"]:focus { border-color: var(--accent); }
+    input[type="text"]::placeholder { color: #475569; }
+    .routing-options {
+      display: flex;
+      gap: 8px;
+      margin-top: 4px;
+    }
+    .routing-btn {
+      flex: 1;
+      padding: 10px 4px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      background: var(--bg);
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.15s;
+    }
+    .routing-btn:active { transform: scale(0.96); }
+    .routing-btn.selected {
+      border-color: var(--accent);
+      background: rgba(59, 130, 246, 0.15);
+      color: var(--accent);
+    }
+    .submit-btn {
+      width: 100%;
+      padding: 16px;
+      font-size: 1.25rem;
+      font-weight: 700;
+      background: var(--success);
+      color: white;
+      border: none;
+      border-radius: 12px;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .submit-btn:active { transform: scale(0.98); }
+    .submit-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .result {
+      padding: 16px;
+      border-radius: 12px;
+      text-align: center;
+      font-weight: 600;
+      display: none;
+    }
+    .result.success {
+      display: block;
+      background: rgba(34, 197, 94, 0.15);
+      border: 1px solid var(--success);
+      color: var(--success);
+    }
+    .result.error {
+      display: block;
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid var(--error);
+      color: var(--error);
+    }
+    .result .detail {
+      font-weight: 400;
+      font-size: 0.875rem;
+      margin-top: 4px;
+      color: var(--muted);
+    }
+    .result a {
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 0.875rem;
+    }
+    .recent-jobs {
+      margin-top: 8px;
+    }
+    .recent-jobs h3 {
+      font-size: 0.75rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 8px;
+    }
+    .recent-job {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 0;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.85rem;
+    }
+    .recent-job:last-child { border-bottom: none; }
+    .recent-job .num { font-weight: 600; }
+    .recent-job .routing-tag {
+      font-size: 0.65rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      color: var(--accent);
+      background: rgba(59, 130, 246, 0.15);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>New Job</h1>
+    <nav>
+      <a href="/">Scan</a>
+      <a href="/dashboard">Dashboard</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="card">
+      <label>Job Number</label>
+      <input type="text" id="job-number" placeholder="3480" inputmode="numeric" autocomplete="off">
+    </div>
+
+    <div class="card">
+      <label>Job Name</label>
+      <input type="text" id="job-name" placeholder="Muirfield Lot 10" autocomplete="off">
+    </div>
+
+    <div class="card">
+      <label>Routing</label>
+      <div class="routing-options">
+        <button class="routing-btn selected" data-route="standard">Standard</button>
+        <button class="routing-btn" data-route="custom_then_finish">Custom + Finish</button>
+        <button class="routing-btn" data-route="finish_only">Finish Only</button>
+      </div>
+    </div>
+
+    <button class="submit-btn" id="submit-btn" disabled>Create Job</button>
+
+    <div class="result" id="result"></div>
+
+    <div class="card recent-jobs">
+      <h3>Recent Jobs</h3>
+      <div id="recent-list"></div>
+    </div>
+  </main>
+
+  <script>
+    const numInput = document.getElementById('job-number');
+    const nameInput = document.getElementById('job-name');
+    const submitBtn = document.getElementById('submit-btn');
+    const resultDiv = document.getElementById('result');
+    const recentList = document.getElementById('recent-list');
+    let selectedRouting = 'standard';
+
+    document.querySelectorAll('.routing-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        selectedRouting = btn.dataset.route;
+        document.querySelectorAll('.routing-btn').forEach(b =>
+          b.classList.toggle('selected', b.dataset.route === selectedRouting));
+      });
+    });
+
+    function updateBtn() {
+      submitBtn.disabled = !(numInput.value.trim() && nameInput.value.trim());
+    }
+    numInput.addEventListener('input', updateBtn);
+    nameInput.addEventListener('input', updateBtn);
+
+    submitBtn.addEventListener('click', async () => {
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Creating...';
+      resultDiv.className = 'result';
+      resultDiv.style.display = 'none';
+
+      try {
+        const res = await fetch('/api/jobs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            job_number: numInput.value.trim(),
+            job_name: nameInput.value.trim(),
+            routing: selectedRouting,
+          }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          resultDiv.className = 'result success';
+          resultDiv.innerHTML = 'Created: ' + data.job_number + ' ' + data.job_name +
+            '<div class="detail">' + data.routing +
+            '</div><a href="/">Go scan it &rarr;</a>';
+          numInput.value = '';
+          nameInput.value = '';
+          numInput.focus();
+          updateBtn();
+          loadRecent();
+        } else {
+          resultDiv.className = 'result error';
+          resultDiv.innerHTML = data.error;
+        }
+      } catch (e) {
+        resultDiv.className = 'result error';
+        resultDiv.innerHTML = 'Network error';
+      }
+      submitBtn.textContent = 'Create Job';
+      updateBtn();
+    });
+
+    async function loadRecent() {
+      const jobs = await fetch('/api/jobs?status=active').then(r => r.json());
+      if (jobs.length === 0) {
+        recentList.innerHTML = '<div style="color:var(--muted);font-size:0.8rem">No jobs yet</div>';
+        return;
+      }
+      recentList.innerHTML = jobs.slice(0, 10).map(j =>
+        '<div class="recent-job">' +
+          '<span class="num">' + j.job_number + ' ' + j.job_name + '</span>' +
+          '<span class="routing-tag">' + j.routing + '</span>' +
+        '</div>'
+      ).join('');
+    }
+    loadRecent();
   </script>
 </body>
 </html>`;
