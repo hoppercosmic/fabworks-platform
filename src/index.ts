@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { scanPage, dashboardPage } from "./ui";
 
 type Bindings = {
   DB: D1Database;
@@ -138,5 +139,8 @@ app.post("/api/scan", async (c) => {
     201
   );
 });
+
+app.get("/", (c) => c.html(scanPage));
+app.get("/dashboard", (c) => c.html(dashboardPage));
 
 export default app;
