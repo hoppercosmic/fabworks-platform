@@ -269,7 +269,7 @@ export const scanPage = page("FabWorks", `
         entityList.innerHTML = jobData.buckets.map(function(b) {
           return '<div class="entity-row' + (selectedEntityId === b.id ? ' selected' : '') + '" data-id="' + b.id + '">' +
             '<div><div class="name">' + b.name + '</div><div class="meta">' + b.cabinet_count + ' cabinets</div></div>' +
-            '<span class="pill pill-' + statusColor(b.status) + '">' + b.status + '</span></div>';
+            '<span class="pill pill-' + statusColor(b.status) + '">' + displayStatus(b.status) + '</span></div>';
         }).join('');
       } else {
         contextLabel.textContent = 'Select Cabinet';
@@ -280,7 +280,7 @@ export const scanPage = page("FabWorks", `
         entityList.innerHTML = jobData.cabinets.map(function(cab) {
           return '<div class="entity-row' + (selectedEntityId === cab.id ? ' selected' : '') + '" data-id="' + cab.id + '">' +
             '<div><div class="name">Cabinet ' + cab.cabinet_number + '</div><div class="meta">' + (cab.label || '') + '</div></div>' +
-            '<span class="pill pill-' + statusColor(cab.status) + '">' + cab.status + '</span></div>';
+            '<span class="pill pill-' + statusColor(cab.status) + '">' + displayStatus(cab.status) + '</span></div>';
         }).join('');
       }
 
@@ -293,6 +293,11 @@ export const scanPage = page("FabWorks", `
       });
     }
 
+    function displayStatus(s) {
+      var m = { pending: 'Pending', in_progress: 'In Progress', complete: 'Complete',
+                assembling: 'Assembling', assembled: 'Assembled', staged: 'Staged' };
+      return m[s] || s;
+    }
     function statusColor(s) {
       if (s === 'pending') return 'yellow';
       if (s === 'assembling') return 'blue';
@@ -540,7 +545,7 @@ export const jobDetailPage = page("Job Detail", `
         bucketList.innerHTML = job.buckets.map(function(b) {
           return '<div class="entity-item"><div><span class="name">' + b.name + '</span>' +
             '<div class="meta">' + b.cabinet_count + ' cabs</div></div>' +
-            '<span class="pill pill-' + pillColor(b.status) + '">' + b.status + '</span></div>';
+            '<span class="pill pill-' + pillColor(b.status) + '">' + displayStatus(b.status) + '</span></div>';
         }).join('') || '<div style="color:var(--muted);font-size:0.8rem">No buckets yet</div>';
 
         var sel = document.getElementById('cab-bucket');
@@ -562,6 +567,11 @@ export const jobDetailPage = page("Job Detail", `
       });
     }
 
+    function displayStatus(s) {
+      var m = { pending: 'Pending', in_progress: 'In Progress', complete: 'Complete',
+                assembling: 'Assembling', assembled: 'Assembled', staged: 'Staged' };
+      return m[s] || s;
+    }
     function pillColor(s) {
       if (s === 'pending') return 'yellow';
       if (s === 'in_progress' || s === 'assembling') return 'blue';
@@ -701,6 +711,10 @@ export const dashboardPage = page("Dashboard", `
       return Math.floor(s / 86400) + 'd ago';
     }
 
+    function displayStatus(s) {
+      var m = { pending: 'Pending', in_progress: 'In Progress', complete: 'Complete' };
+      return m[s] || s;
+    }
     function pillColor(s) {
       if (s === 'pending') return 'yellow';
       if (s === 'in_progress') return 'blue';
@@ -750,7 +764,7 @@ export const dashboardPage = page("Dashboard", `
                 : 'No scans yet';
 
               var bucketInfo = job.buckets.map(function(b) {
-                return '<div class="bucket-row"><span>' + b.name + '</span><span class="pill pill-' + pillColor(b.status) + '">' + b.status + '</span></div>';
+                return '<div class="bucket-row"><span>' + b.name + '</span><span class="pill pill-' + pillColor(b.status) + '">' + displayStatus(b.status) + '</span></div>';
               }).join('');
 
               return '<div class="job-card">' +
