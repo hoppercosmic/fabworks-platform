@@ -121,6 +121,7 @@ function page(title: string, extraStyles: string, nav: string, body: string, scr
 const NAV_SCAN = '<a href="/">Scan</a>';
 const NAV_NEW = '<a href="/jobs/new">+ Job</a>';
 const NAV_DASH = '<a href="/dashboard">Dashboard</a>';
+const NAV_STATIONS = '<a href="/stations">Stations</a>';
 
 // ─── SCAN PAGE ────────────────────────────────────────────
 export const scanPage = page("FabWorks", `
@@ -148,7 +149,7 @@ export const scanPage = page("FabWorks", `
     .remember-label { font-size: 0.75rem; color: var(--muted); display: flex; align-items: center; gap: 4px; white-space: nowrap; }
     .section-label { font-size: 0.75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
     #context-panel { display: none; }
-`, `${NAV_NEW}${NAV_DASH}`, `
+`, `${NAV_NEW}${NAV_STATIONS}${NAV_DASH}`, `
   <main>
     <div class="card">
       <label>Your Station</label>
@@ -373,7 +374,7 @@ export const newJobPage = page("New Job", `
     .recent-job:last-child { border-bottom: none; }
     .recent-job .num { font-weight: 600; }
     .recent-job a { color: var(--accent); text-decoration: none; font-size: 0.8rem; }
-`, `${NAV_SCAN}${NAV_DASH}`, `
+`, `${NAV_SCAN}${NAV_STATIONS}${NAV_DASH}`, `
   <main>
     <div class="card">
       <label>Job Number</label>
@@ -481,7 +482,7 @@ export const jobDetailPage = page("Job Detail", `
     .cab-tile.assembled { border-color: var(--success); color: var(--success); }
     .cab-tile.staged { border-color: var(--purple); color: var(--purple); }
     .cab-tile .sub { font-weight: 400; font-size: 0.65rem; color: var(--muted); }
-`, `${NAV_SCAN}${NAV_NEW}${NAV_DASH}`, `
+`, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_DASH}`, `
   <main>
     <div id="loading" style="color:var(--muted);text-align:center;padding:48px">Loading...</div>
     <div id="content" style="display:none">
@@ -672,7 +673,7 @@ export const dashboardPage = page("Dashboard", `
     .feed-meta { color: var(--muted); font-size: 0.7rem; margin-top: 2px; }
     .empty { text-align: center; padding: 48px 16px; color: var(--muted); }
     .empty a { color: var(--accent); text-decoration: none; }
-`, `${NAV_SCAN}${NAV_NEW}`, `
+`, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}`, `
   <main>
     <div class="top-bar">
       <span id="updated"></span>
@@ -793,4 +794,134 @@ export const dashboardPage = page("Dashboard", `
     refreshBtn.addEventListener('click', load);
     load();
     startAuto();
+`);
+
+// ─── STATION VIEW PAGE ──────────────────────────────────────
+export const stationViewPage = page("Station View", `
+    main { flex: 1; padding: 16px; max-width: 600px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+    .station-bar { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0; -webkit-overflow-scrolling: touch; }
+    .station-chip {
+      flex-shrink: 0; padding: 8px 12px; font-size: 0.75rem; font-weight: 600;
+      background: var(--bg); border: 2px solid var(--border); border-radius: 20px;
+      color: var(--muted); cursor: pointer; transition: all 0.15s; white-space: nowrap;
+    }
+    .station-chip:active { transform: scale(0.96); }
+    .station-chip.selected { border-color: var(--accent); background: rgba(59,130,246,0.15); color: var(--accent); }
+    .level-label { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 8px 0 2px; }
+    .item-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 12px 14px; display: flex; justify-content: space-between; align-items: center;
+    }
+    .item-card .primary { font-weight: 700; font-size: 1rem; }
+    .item-card .secondary { font-size: 0.8rem; color: var(--muted); margin-top: 2px; }
+    .item-card .right { text-align: right; font-size: 0.75rem; color: var(--muted); }
+    .item-card a { color: var(--accent); text-decoration: none; font-size: 0.75rem; }
+    .count-badge { font-size: 0.7rem; font-weight: 700; background: rgba(59,130,246,0.15); color: var(--accent); padding: 2px 8px; border-radius: 10px; margin-left: 6px; }
+    .empty-state { text-align: center; padding: 48px 16px; color: var(--muted); font-size: 0.9rem; }
+`, `${NAV_SCAN}${NAV_NEW}${NAV_DASH}`, `
+  <main>
+    <div class="card">
+      <label>Station</label>
+      <div class="station-bar" id="station-bar"></div>
+    </div>
+    <div id="item-count" style="font-size:0.8rem;color:var(--muted)"></div>
+    <div id="items"></div>
+  </main>
+`, `
+    var STATIONS = [
+      { slug: 'receiving', name: 'Receiving', level: 'job' },
+      { slug: 'kitting', name: 'Kitting', level: 'job' },
+      { slug: 'cnc', name: 'CNC', level: 'bucket' },
+      { slug: 'edge_banding', name: 'Edge Banding', level: 'bucket' },
+      { slug: 'custom', name: 'Custom', level: 'bucket' },
+      { slug: 'finishing', name: 'Finishing', level: 'bucket' },
+      { slug: 'to_assembly', name: 'To Assembly', level: 'bucket' },
+      { slug: 'assembly_start', name: 'Assembly Start', level: 'cabinet' },
+      { slug: 'assembly_complete', name: 'Assembly Complete', level: 'cabinet' },
+      { slug: 'staging', name: 'Staging', level: 'cabinet' },
+    ];
+
+    var selected = localStorage.getItem('stationView') || 'receiving';
+    var bar = document.getElementById('station-bar');
+    var itemsDiv = document.getElementById('items');
+    var countDiv = document.getElementById('item-count');
+
+    function renderBar() {
+      bar.innerHTML = STATIONS.map(function(s) {
+        return '<div class="station-chip' + (s.slug === selected ? ' selected' : '') +
+          '" data-slug="' + s.slug + '">' + s.name + '</div>';
+      }).join('');
+    }
+
+    bar.addEventListener('click', function(e) {
+      var chip = e.target.closest('.station-chip');
+      if (!chip) return;
+      selected = chip.dataset.slug;
+      localStorage.setItem('stationView', selected);
+      renderBar();
+      load();
+    });
+
+    function timeAgo(date) {
+      var s = Math.floor((Date.now() - date.getTime()) / 1000);
+      if (s < 60) return 'just now';
+      if (s < 3600) return Math.floor(s / 60) + 'm ago';
+      if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+      return Math.floor(s / 86400) + 'd ago';
+    }
+
+    function load() {
+      fetch('/api/stations/' + selected + '/items')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          var items = data.items || [];
+          var level = data.level;
+          var label = level === 'job' ? 'jobs' : level === 'bucket' ? 'buckets' : 'cabinets';
+          countDiv.textContent = items.length + ' ' + label + ' at this station';
+
+          if (items.length === 0) {
+            itemsDiv.innerHTML = '<div class="empty-state">Nothing here right now</div>';
+            return;
+          }
+
+          if (level === 'job') {
+            itemsDiv.innerHTML = items.map(function(j) {
+              return '<div class="item-card"><div>' +
+                '<div class="primary">' + j.job_number + '</div>' +
+                '<div class="secondary">' + j.job_name + '</div>' +
+                '</div><div class="right">' +
+                '<div>' + j.cabinet_count + ' cabinets</div>' +
+                '<div>' + timeAgo(new Date(j.scanned_at + 'Z')) + '</div>' +
+                '<a href="/job/' + j.id + '">Details</a>' +
+                '</div></div>';
+            }).join('');
+          } else if (level === 'bucket') {
+            itemsDiv.innerHTML = items.map(function(b) {
+              return '<div class="item-card"><div>' +
+                '<div class="primary">' + b.name + '</div>' +
+                '<div class="secondary">' + b.job_number + ' ' + b.job_name + '</div>' +
+                '</div><div class="right">' +
+                '<div>' + b.cabinet_count + ' cabs</div>' +
+                '<div>' + timeAgo(new Date(b.scanned_at + 'Z')) + '</div>' +
+                '<a href="/job/' + b.job_id + '">Details</a>' +
+                '</div></div>';
+            }).join('');
+          } else {
+            itemsDiv.innerHTML = items.map(function(cab) {
+              var label = cab.label || ('Cab ' + cab.cabinet_number);
+              var bucket = cab.bucket_name ? ' / ' + cab.bucket_name : '';
+              return '<div class="item-card"><div>' +
+                '<div class="primary">' + label + '</div>' +
+                '<div class="secondary">' + cab.job_number + ' ' + cab.job_name + bucket + '</div>' +
+                '</div><div class="right">' +
+                '<div>' + timeAgo(new Date(cab.scanned_at + 'Z')) + '</div>' +
+                '<a href="/job/' + cab.job_id + '">Details</a>' +
+                '</div></div>';
+            }).join('');
+          }
+        });
+    }
+
+    renderBar();
+    load();
 `);

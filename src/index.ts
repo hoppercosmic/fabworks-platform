@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { scanPage, dashboardPage, newJobPage, jobDetailPage } from "./ui";
+import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage } from "./ui";
 
 type Bindings = { DB: D1Database };
 const app = new Hono<{ Bindings: Bindings }>();
@@ -292,11 +292,82 @@ app.get("/api/metrics/assembly", async (c) => {
   return c.json(result.results);
 });
 
+// --- Station view ---
+
+app.get("/api/stations/:slug/items", async (c) => {
+  const slug = c.req.param("slug") as StationSlug;
+  const stationDef = STATIONS[slug];
+  if (!stationDef) return c.json({ error: `Unknown station: ${slug}` }, 400);
+
+  const laterStations = Object.entries(STATIONS)
+    .filter(([, s]) => s.level === stationDef.level && s.seq > stationDef.seq)
+    .map(([k]) => k);
+
+  const laterPlaceholders = laterStations.map(() => "?").join(",");
+
+  if (stationDef.level === "job") {
+    const query = laterStations.length > 0
+      ? `SELECT DISTINCT j.id, j.job_number, j.job_name, j.cabinet_count, s.scanned_at
+         FROM jobs j
+         JOIN scans s ON s.job_id = j.id AND s.station = ?
+         WHERE j.status = 'active'
+         AND NOT EXISTS (SELECT 1 FROM scans s2 WHERE s2.job_id = j.id AND s2.station IN (${laterPlaceholders}))
+         ORDER BY s.scanned_at DESC`
+      : `SELECT DISTINCT j.id, j.job_number, j.job_name, j.cabinet_count, s.scanned_at
+         FROM jobs j
+         JOIN scans s ON s.job_id = j.id AND s.station = ?
+         WHERE j.status = 'active'
+         ORDER BY s.scanned_at DESC`;
+    const result = await c.env.DB.prepare(query).bind(slug, ...laterStations).all();
+    return c.json({ level: "job", items: result.results });
+  }
+
+  if (stationDef.level === "bucket") {
+    const query = laterStations.length > 0
+      ? `SELECT DISTINCT b.id, b.name, b.cabinet_count, b.status, j.id as job_id, j.job_number, j.job_name, s.scanned_at
+         FROM buckets b
+         JOIN jobs j ON b.job_id = j.id
+         JOIN scans s ON s.bucket_id = b.id AND s.station = ?
+         WHERE j.status = 'active'
+         AND NOT EXISTS (SELECT 1 FROM scans s2 WHERE s2.bucket_id = b.id AND s2.station IN (${laterPlaceholders}))
+         ORDER BY s.scanned_at DESC`
+      : `SELECT DISTINCT b.id, b.name, b.cabinet_count, b.status, j.id as job_id, j.job_number, j.job_name, s.scanned_at
+         FROM buckets b
+         JOIN jobs j ON b.job_id = j.id
+         JOIN scans s ON s.bucket_id = b.id AND s.station = ?
+         WHERE j.status = 'active'
+         ORDER BY s.scanned_at DESC`;
+    const result = await c.env.DB.prepare(query).bind(slug, ...laterStations).all();
+    return c.json({ level: "bucket", items: result.results });
+  }
+
+  // cabinet level
+  const query = laterStations.length > 0
+    ? `SELECT DISTINCT cab.id, cab.cabinet_number, cab.label, cab.status, b.name as bucket_name, j.id as job_id, j.job_number, j.job_name, s.scanned_at
+       FROM cabinets cab
+       JOIN jobs j ON cab.job_id = j.id
+       LEFT JOIN buckets b ON cab.bucket_id = b.id
+       JOIN scans s ON s.cabinet_id = cab.id AND s.station = ?
+       WHERE j.status = 'active'
+       AND NOT EXISTS (SELECT 1 FROM scans s2 WHERE s2.cabinet_id = cab.id AND s2.station IN (${laterPlaceholders}))
+       ORDER BY s.scanned_at DESC`
+    : `SELECT DISTINCT cab.id, cab.cabinet_number, cab.label, cab.status, b.name as bucket_name, j.id as job_id, j.job_number, j.job_name, s.scanned_at
+       FROM cabinets cab
+       JOIN jobs j ON cab.job_id = j.id
+       LEFT JOIN buckets b ON cab.bucket_id = b.id
+       JOIN scans s ON s.cabinet_id = cab.id AND s.station = ?
+       WHERE j.status = 'active'
+       ORDER BY s.scanned_at DESC`;
+  const result = await c.env.DB.prepare(query).bind(slug, ...laterStations).all();
+  return c.json({ level: "cabinet", items: result.results });
+});
+
 // --- Pages ---
 
 app.get("/", (c) => c.html(scanPage));
 app.get("/jobs/new", (c) => c.html(newJobPage));
 app.get("/dashboard", (c) => c.html(dashboardPage));
 app.get("/job/:id", (c) => c.html(jobDetailPage));
+app.get("/stations", (c) => c.html(stationViewPage));
 
 export default app;
