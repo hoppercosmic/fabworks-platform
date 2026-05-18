@@ -175,6 +175,13 @@ app.post("/api/scan", async (c) => {
     return c.json({ error: `${stationDef.name} requires cabinet_id` }, 400);
   }
 
+  // Update bucket status on first bucket-level scan
+  if (stationDef.level === "bucket" && body.bucket_id) {
+    await c.env.DB.prepare(
+      "UPDATE buckets SET status = 'in_progress' WHERE id = ? AND status = 'pending'"
+    ).bind(body.bucket_id).run();
+  }
+
   // Update cabinet status for assembly scans
   if (station === "assembly_start" && body.cabinet_id) {
     await c.env.DB.prepare("UPDATE cabinets SET status = 'assembling' WHERE id = ?")
@@ -185,6 +192,22 @@ app.post("/api/scan", async (c) => {
   } else if (station === "staging" && body.cabinet_id) {
     await c.env.DB.prepare("UPDATE cabinets SET status = 'staged' WHERE id = ?")
       .bind(body.cabinet_id).run();
+
+    const cabinet = await c.env.DB.prepare(
+      "SELECT bucket_id FROM cabinets WHERE id = ?"
+    ).bind(body.cabinet_id).first<{ bucket_id: number | null }>();
+
+    if (cabinet?.bucket_id) {
+      const remaining = await c.env.DB.prepare(
+        "SELECT COUNT(*) as cnt FROM cabinets WHERE bucket_id = ? AND status != 'staged'"
+      ).bind(cabinet.bucket_id).first<{ cnt: number }>();
+
+      if (remaining?.cnt === 0) {
+        await c.env.DB.prepare(
+          "UPDATE buckets SET status = 'complete' WHERE id = ?"
+        ).bind(cabinet.bucket_id).run();
+      }
+    }
   }
 
   const scan = await c.env.DB.prepare(
