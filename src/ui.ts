@@ -1,3 +1,5 @@
+import type { TenantConfig } from "./index";
+
 const SHARED_STYLES = `
     * { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -123,8 +125,40 @@ const NAV_NEW = '<a href="/jobs/new">+ Job</a>';
 const NAV_DASH = '<a href="/dashboard">Dashboard</a>';
 const NAV_STATIONS = '<a href="/stations">Stations</a>';
 
+function stationNamesJS(config: TenantConfig): string {
+  const map: Record<string, string> = {};
+  config.stations.forEach((s) => { map[s.slug] = s.name; });
+  return `var STATION_NAMES = ${JSON.stringify(map)};`;
+}
+
+function displayStatusJS(config: TenantConfig): string {
+  const map: Record<string, string> = { pending: "Pending", in_progress: "In Progress", complete: "Complete" };
+  config.l3_statuses.forEach((s) => {
+    if (!map[s]) map[s] = s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ");
+  });
+  return `function displayStatus(s) { var m = ${JSON.stringify(map)}; return m[s] || s; }`;
+}
+
+const STATUS_COLOR_JS = `
+    function statusColor(s) {
+      if (s === 'pending') return 'yellow';
+      if (s === 'in_progress') return 'blue';
+      if (s === 'complete') return 'green';
+      return 'blue';
+    }
+    function pillColor(s) {
+      if (s === 'pending') return 'yellow';
+      if (s === 'in_progress') return 'blue';
+      if (s === 'complete' || s === 'assembled' || s === 'inspected' || s === 'shipped' || s === 'packed') return 'green';
+      if (s === 'staged') return 'purple';
+      return 'blue';
+    }`;
+
 // ─── SCAN PAGE ────────────────────────────────────────────
-export const scanPage = page("FabWorks", `
+export function scanPage(config: TenantConfig): string {
+  const L2 = config.entity_labels.l2;
+  const L3 = config.entity_labels.l3;
+  return page("FabWorks", `
     main { flex: 1; padding: 16px; max-width: 480px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
     .station-bar { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0; -webkit-overflow-scrolling: touch; }
     .station-chip {
@@ -156,8 +190,8 @@ export const scanPage = page("FabWorks", `
       <div class="station-bar" id="station-bar"></div>
     </div>
     <div class="card">
-      <label>Job</label>
-      <input type="text" id="job-input" placeholder="Job number" inputmode="numeric" autocomplete="off">
+      <label>${config.entity_labels.l1}</label>
+      <input type="text" id="job-input" placeholder="${config.entity_labels.l1} number" inputmode="numeric" autocomplete="off">
       <div id="job-info" style="margin-top:8px;font-size:0.85rem;color:var(--muted)"></div>
     </div>
     <div class="card" id="context-panel">
@@ -175,18 +209,10 @@ export const scanPage = page("FabWorks", `
     <div class="result" id="result"></div>
   </main>
 `, `
-    var STATIONS = {
-      receiving:         { name: 'Receiving',         level: 'job' },
-      kitting:           { name: 'Kitting',           level: 'job' },
-      cnc:               { name: 'CNC',               level: 'bucket' },
-      edge_banding:      { name: 'Edge Banding',      level: 'bucket' },
-      custom:            { name: 'Custom',            level: 'bucket' },
-      finishing:         { name: 'Finishing',          level: 'bucket' },
-      to_assembly:       { name: 'To Assembly',       level: 'bucket' },
-      assembly_start:    { name: 'Assembly Start',    level: 'cabinet' },
-      assembly_complete: { name: 'Assembly Complete',  level: 'cabinet' },
-      staging:           { name: 'Staging',           level: 'cabinet' },
-    };
+    var STATIONS = ${JSON.stringify(config.stations)};
+    var LABELS = ${JSON.stringify(config.entity_labels)};
+    ${displayStatusJS(config)}
+    ${STATUS_COLOR_JS}
 
     var selectedStation = localStorage.getItem('fw_station') || null;
     var selectedEntityId = null;
@@ -207,16 +233,22 @@ export const scanPage = page("FabWorks", `
     var savedName = localStorage.getItem('fw_name');
     if (savedName) scannedByInput.value = savedName;
 
-    Object.keys(STATIONS).forEach(function(slug) {
-      var s = STATIONS[slug];
+    function getStation(slug) {
+      for (var i = 0; i < STATIONS.length; i++) {
+        if (STATIONS[i].slug === slug) return STATIONS[i];
+      }
+      return null;
+    }
+
+    STATIONS.forEach(function(s) {
       var chip = document.createElement('button');
-      chip.className = 'station-chip' + (slug === selectedStation ? ' selected' : '');
+      chip.className = 'station-chip' + (s.slug === selectedStation ? ' selected' : '');
       chip.textContent = s.name;
-      chip.dataset.slug = slug;
+      chip.dataset.slug = s.slug;
       chip.addEventListener('click', function() {
-        selectedStation = slug;
-        localStorage.setItem('fw_station', slug);
-        document.querySelectorAll('.station-chip').forEach(function(c) { c.classList.toggle('selected', c.dataset.slug === slug); });
+        selectedStation = s.slug;
+        localStorage.setItem('fw_station', s.slug);
+        document.querySelectorAll('.station-chip').forEach(function(c) { c.classList.toggle('selected', c.dataset.slug === s.slug); });
         selectedEntityId = null;
         loadJobContext();
         updateScanBtn();
@@ -244,12 +276,12 @@ export const scanPage = page("FabWorks", `
           fetch('/api/jobs/' + job.id).then(function(r) { return r.json(); }).then(function(detail) {
             jobData = detail;
             jobInfo.innerHTML = '<strong>' + detail.job_name + '</strong> — ' +
-              detail.buckets.length + ' buckets, ' + detail.cabinets.length + ' cabinets';
+              detail.buckets.length + ' ' + LABELS.l2.toLowerCase() + 's, ' + detail.cabinets.length + ' ' + LABELS.l3.toLowerCase() + 's';
             loadJobContext();
             updateScanBtn();
           });
         } else {
-          jobInfo.textContent = 'No active job found';
+          jobInfo.textContent = 'No active ' + LABELS.l1.toLowerCase() + ' found';
           updateScanBtn();
         }
       });
@@ -257,31 +289,31 @@ export const scanPage = page("FabWorks", `
 
     function loadJobContext() {
       if (!jobData || !selectedStation) { contextPanel.style.display = 'none'; return; }
-      var level = STATIONS[selectedStation].level;
-      if (level === 'job') { contextPanel.style.display = 'none'; return; }
+      var station = getStation(selectedStation);
+      if (!station || station.level === 'l1') { contextPanel.style.display = 'none'; return; }
       contextPanel.style.display = 'block';
 
-      if (level === 'bucket') {
-        contextLabel.textContent = 'Select Bucket';
+      if (station.level === 'l2') {
+        contextLabel.textContent = 'Select ' + LABELS.l2;
         if (jobData.buckets.length === 0) {
-          entityList.innerHTML = '<div style="color:var(--muted);font-size:0.85rem">No buckets — <a href="/job/' + jobData.id + '" style="color:var(--accent)">add buckets</a></div>';
+          entityList.innerHTML = '<div style="color:var(--muted);font-size:0.85rem">No ' + LABELS.l2.toLowerCase() + 's — <a href="/job/' + jobData.id + '" style="color:var(--accent)">add ' + LABELS.l2.toLowerCase() + 's</a></div>';
           return;
         }
         entityList.innerHTML = jobData.buckets.map(function(b) {
           return '<div class="entity-row' + (selectedEntityId === b.id ? ' selected' : '') + '" data-id="' + b.id + '">' +
-            '<div><div class="name">' + b.name + '</div><div class="meta">' + b.cabinet_count + ' cabinets</div></div>' +
-            '<span class="pill pill-' + statusColor(b.status) + '">' + displayStatus(b.status) + '</span></div>';
+            '<div><div class="name">' + b.name + '</div><div class="meta">' + b.cabinet_count + ' ' + LABELS.l3.toLowerCase() + 's</div></div>' +
+            '<span class="pill pill-' + pillColor(b.status) + '">' + displayStatus(b.status) + '</span></div>';
         }).join('');
       } else {
-        contextLabel.textContent = 'Select Cabinet';
+        contextLabel.textContent = 'Select ' + LABELS.l3;
         if (jobData.cabinets.length === 0) {
-          entityList.innerHTML = '<div style="color:var(--muted);font-size:0.85rem">No cabinets — <a href="/job/' + jobData.id + '" style="color:var(--accent)">add cabinets</a></div>';
+          entityList.innerHTML = '<div style="color:var(--muted);font-size:0.85rem">No ' + LABELS.l3.toLowerCase() + 's — <a href="/job/' + jobData.id + '" style="color:var(--accent)">add ' + LABELS.l3.toLowerCase() + 's</a></div>';
           return;
         }
         entityList.innerHTML = jobData.cabinets.map(function(cab) {
           return '<div class="entity-row' + (selectedEntityId === cab.id ? ' selected' : '') + '" data-id="' + cab.id + '">' +
-            '<div><div class="name">Cabinet ' + cab.cabinet_number + '</div><div class="meta">' + (cab.label || '') + '</div></div>' +
-            '<span class="pill pill-' + statusColor(cab.status) + '">' + displayStatus(cab.status) + '</span></div>';
+            '<div><div class="name">' + LABELS.l3 + ' ' + cab.cabinet_number + '</div><div class="meta">' + (cab.label || '') + '</div></div>' +
+            '<span class="pill pill-' + pillColor(cab.status) + '">' + displayStatus(cab.status) + '</span></div>';
         }).join('');
       }
 
@@ -294,23 +326,11 @@ export const scanPage = page("FabWorks", `
       });
     }
 
-    function displayStatus(s) {
-      var m = { pending: 'Pending', in_progress: 'In Progress', complete: 'Complete',
-                assembling: 'Assembling', assembled: 'Assembled', staged: 'Staged' };
-      return m[s] || s;
-    }
-    function statusColor(s) {
-      if (s === 'pending') return 'yellow';
-      if (s === 'assembling') return 'blue';
-      if (s === 'assembled' || s === 'complete') return 'green';
-      if (s === 'staged') return 'purple';
-      return 'blue';
-    }
-
     function updateScanBtn() {
       if (!selectedStation || !jobData) { scanBtn.disabled = true; return; }
-      var level = STATIONS[selectedStation].level;
-      if (level === 'job') { scanBtn.disabled = false; return; }
+      var station = getStation(selectedStation);
+      if (!station) { scanBtn.disabled = true; return; }
+      if (station.level === 'l1') { scanBtn.disabled = false; return; }
       scanBtn.disabled = !selectedEntityId;
     }
 
@@ -323,14 +343,14 @@ export const scanPage = page("FabWorks", `
 
       if (rememberCheck.checked) localStorage.setItem('fw_name', scannedByInput.value);
 
-      var level = STATIONS[selectedStation].level;
+      var station = getStation(selectedStation);
       var payload = {
         station: selectedStation,
         job_id: jobData.id,
         scanned_by: scannedByInput.value.trim() || undefined,
       };
-      if (level === 'bucket') payload.bucket_id = selectedEntityId;
-      if (level === 'cabinet') payload.cabinet_id = selectedEntityId;
+      if (station.level === 'l2') payload.bucket_id = selectedEntityId;
+      if (station.level === 'l3') payload.cabinet_id = selectedEntityId;
 
       fetch('/api/scan', {
         method: 'POST',
@@ -363,9 +383,13 @@ export const scanPage = page("FabWorks", `
       });
     });
 `);
+}
 
 // ─── NEW JOB PAGE ────────────────────────────────────────
-export const newJobPage = page("New Job", `
+export function newJobPage(config: TenantConfig): string {
+  const L1 = config.entity_labels.l1;
+  const L3 = config.entity_labels.l3;
+  return page(`New ${L1}`, `
     main { flex: 1; padding: 16px; max-width: 480px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
     .recent-job {
       display: flex; justify-content: space-between; align-items: center;
@@ -377,25 +401,27 @@ export const newJobPage = page("New Job", `
 `, `${NAV_SCAN}${NAV_STATIONS}${NAV_DASH}`, `
   <main>
     <div class="card">
-      <label>Job Number</label>
+      <label>${L1} Number</label>
       <input type="text" id="job-number" placeholder="3480" inputmode="numeric" autocomplete="off">
     </div>
     <div class="card">
-      <label>Job Name</label>
+      <label>${L1} Name</label>
       <input type="text" id="job-name" placeholder="Muirfield Lot 10" autocomplete="off">
     </div>
     <div class="card">
-      <label>Total Cabinet Count</label>
+      <label>Total ${L3} Count</label>
       <input type="number" id="cab-count" placeholder="24" min="0">
     </div>
-    <button class="btn btn-success" id="submit-btn" disabled>Create Job</button>
+    <button class="btn btn-success" id="submit-btn" disabled>Create ${L1}</button>
     <div class="result" id="result"></div>
     <div class="card">
-      <label>Recent Jobs</label>
+      <label>Recent ${L1}s</label>
       <div id="recent-list"></div>
     </div>
   </main>
 `, `
+    var LABELS = ${JSON.stringify(config.entity_labels)};
+
     var numInput = document.getElementById('job-number');
     var nameInput = document.getElementById('job-name');
     var cabInput = document.getElementById('cab-count');
@@ -425,25 +451,25 @@ export const newJobPage = page("New Job", `
         if (r.ok) {
           resultDiv.className = 'result success';
           resultDiv.innerHTML = 'Created: ' + r.data.job_number + ' ' + r.data.job_name +
-            '<div class="detail"><a href="/job/' + r.data.id + '" style="color:var(--accent)">Set up buckets & cabinets &rarr;</a></div>';
+            '<div class="detail"><a href="/job/' + r.data.id + '" style="color:var(--accent)">Set up ' + LABELS.l2.toLowerCase() + 's & ' + LABELS.l3.toLowerCase() + 's &rarr;</a></div>';
           numInput.value = ''; nameInput.value = ''; cabInput.value = '';
           numInput.focus(); updateBtn(); loadRecent();
         } else {
           resultDiv.className = 'result error';
           resultDiv.innerHTML = r.data.error;
         }
-        submitBtn.textContent = 'Create Job'; updateBtn();
+        submitBtn.textContent = 'Create ${L1}'; updateBtn();
       }).catch(function() {
         resultDiv.className = 'result error';
         resultDiv.innerHTML = 'Network error';
-        submitBtn.textContent = 'Create Job'; updateBtn();
+        submitBtn.textContent = 'Create ${L1}'; updateBtn();
       });
     });
 
     function loadRecent() {
       fetch('/api/jobs?status=active').then(function(r) { return r.json(); }).then(function(jobs) {
         recentList.innerHTML = jobs.length === 0
-          ? '<div style="color:var(--muted);font-size:0.8rem">No jobs yet</div>'
+          ? '<div style="color:var(--muted);font-size:0.8rem">No ' + LABELS.l1.toLowerCase() + 's yet</div>'
           : jobs.slice(0, 10).map(function(j) {
             return '<div class="recent-job"><span class="num">' + j.job_number + ' ' + j.job_name + '</span>' +
               '<a href="/job/' + j.id + '">Setup</a></div>';
@@ -452,9 +478,13 @@ export const newJobPage = page("New Job", `
     }
     loadRecent();
 `);
+}
 
 // ─── JOB DETAIL PAGE ────────────────────────────────────
-export const jobDetailPage = page("Job Detail", `
+export function jobDetailPage(config: TenantConfig): string {
+  const L2 = config.entity_labels.l2;
+  const L3 = config.entity_labels.l3;
+  return page(`${config.entity_labels.l1} Detail`, `
     main { flex: 1; padding: 16px; max-width: 640px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
     .job-title { font-size: 1.4rem; font-weight: 700; }
     .job-meta { font-size: 0.85rem; color: var(--muted); margin-top: 4px; }
@@ -491,7 +521,7 @@ export const jobDetailPage = page("Job Detail", `
         <div class="job-meta" id="job-meta"></div>
       </div>
       <div class="card">
-        <div class="section-title">Buckets</div>
+        <div class="section-title">${L2}s</div>
         <div class="add-form">
           <input type="text" id="bucket-name" placeholder="C1 Mirlux Matte">
           <input type="number" id="bucket-cabs" placeholder="4" style="max-width:60px" min="1">
@@ -501,13 +531,13 @@ export const jobDetailPage = page("Job Detail", `
       </div>
       <div class="card">
         <div class="section-title">
-          <span>Cabinets</span>
+          <span>${L3}s</span>
           <button class="btn btn-sm" id="gen-cabs-btn" style="background:var(--accent);color:white">Auto-generate</button>
         </div>
         <div class="add-form">
-          <input type="number" id="cab-number" placeholder="Cab #" min="1" style="max-width:80px">
+          <input type="number" id="cab-number" placeholder="${L3} #" min="1" style="max-width:80px">
           <input type="text" id="cab-label" placeholder="Label (optional)">
-          <select id="cab-bucket" style="max-width:120px;font-size:0.8rem"><option value="">No bucket</option></select>
+          <select id="cab-bucket" style="max-width:120px;font-size:0.8rem"><option value="">No ${L2.toLowerCase()}</option></select>
           <button class="btn btn-sm" id="add-cab-btn" style="background:var(--accent);color:white">Add</button>
         </div>
         <div class="cab-grid" id="cab-grid"></div>
@@ -519,11 +549,10 @@ export const jobDetailPage = page("Job Detail", `
     </div>
   </main>
 `, `
-    var STATION_NAMES = {
-      receiving: 'Receiving', kitting: 'Kitting', cnc: 'CNC', edge_banding: 'Edge Banding',
-      custom: 'Custom', finishing: 'Finishing', to_assembly: 'To Assembly',
-      assembly_start: 'Assembly Start', assembly_complete: 'Assembly Complete', staging: 'Staging'
-    };
+    ${stationNamesJS(config)}
+    var LABELS = ${JSON.stringify(config.entity_labels)};
+    ${displayStatusJS(config)}
+    ${STATUS_COLOR_JS}
 
     var jobId = window.location.pathname.split('/').pop();
     var job = null;
@@ -540,24 +569,24 @@ export const jobDetailPage = page("Job Detail", `
 
         document.getElementById('job-title').textContent = job.job_number + ' ' + job.job_name;
         document.getElementById('job-meta').textContent =
-          job.cabinet_count + ' total cabinets — ' + job.buckets.length + ' buckets — ' + job.cabinets.length + ' cabinets entered';
+          job.cabinet_count + ' total ' + LABELS.l3.toLowerCase() + 's — ' + job.buckets.length + ' ' + LABELS.l2.toLowerCase() + 's — ' + job.cabinets.length + ' ' + LABELS.l3.toLowerCase() + 's entered';
 
         var bucketList = document.getElementById('bucket-list');
         bucketList.innerHTML = job.buckets.map(function(b) {
           return '<div class="entity-item"><div><span class="name">' + b.name + '</span>' +
-            '<div class="meta">' + b.cabinet_count + ' cabs</div></div>' +
+            '<div class="meta">' + b.cabinet_count + ' ' + LABELS.l3.toLowerCase() + 's</div></div>' +
             '<span class="pill pill-' + pillColor(b.status) + '">' + displayStatus(b.status) + '</span></div>';
-        }).join('') || '<div style="color:var(--muted);font-size:0.8rem">No buckets yet</div>';
+        }).join('') || '<div style="color:var(--muted);font-size:0.8rem">No ' + LABELS.l2.toLowerCase() + 's yet</div>';
 
         var sel = document.getElementById('cab-bucket');
-        sel.innerHTML = '<option value="">No bucket</option>' +
+        sel.innerHTML = '<option value="">No ' + LABELS.l2.toLowerCase() + '</option>' +
           job.buckets.map(function(b) { return '<option value="' + b.id + '">' + b.name + '</option>'; }).join('');
 
         var grid = document.getElementById('cab-grid');
         grid.innerHTML = job.cabinets.map(function(c) {
-          return '<div class="cab-tile ' + c.status + '">Cab ' + c.cabinet_number +
-            '<div class="sub">' + (c.label || c.status) + '</div></div>';
-        }).join('') || '<div style="color:var(--muted);font-size:0.8rem">No cabinets yet</div>';
+          return '<div class="cab-tile ' + c.status + '">' + LABELS.l3 + ' ' + c.cabinet_number +
+            '<div class="sub">' + (c.label || displayStatus(c.status)) + '</div></div>';
+        }).join('') || '<div style="color:var(--muted);font-size:0.8rem">No ' + LABELS.l3.toLowerCase() + 's yet</div>';
 
         var log = document.getElementById('scan-log');
         log.innerHTML = job.scans.map(function(s) {
@@ -566,19 +595,6 @@ export const jobDetailPage = page("Job Detail", `
             new Date(s.scanned_at + 'Z').toLocaleString() + '</div></div>';
         }).join('') || '<div style="color:var(--muted)">No scans yet</div>';
       });
-    }
-
-    function displayStatus(s) {
-      var m = { pending: 'Pending', in_progress: 'In Progress', complete: 'Complete',
-                assembling: 'Assembling', assembled: 'Assembled', staged: 'Staged' };
-      return m[s] || s;
-    }
-    function pillColor(s) {
-      if (s === 'pending') return 'yellow';
-      if (s === 'in_progress' || s === 'assembling') return 'blue';
-      if (s === 'complete' || s === 'assembled') return 'green';
-      if (s === 'staged') return 'purple';
-      return 'blue';
     }
 
     document.getElementById('add-bucket-btn').addEventListener('click', function() {
@@ -636,9 +652,11 @@ export const jobDetailPage = page("Job Detail", `
 
     load();
 `);
+}
 
 // ─── DASHBOARD ────────────────────────────────────────────
-export const dashboardPage = page("Dashboard", `
+export function dashboardPage(config: TenantConfig): string {
+  return page("Dashboard", `
     main { padding: 16px; max-width: 1100px; margin: 0 auto; }
     .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
     .top-bar span { font-size: 0.8rem; color: var(--muted); }
@@ -658,9 +676,9 @@ export const dashboardPage = page("Dashboard", `
     .stat { display: flex; align-items: center; gap: 4px; }
     .stat .dot { width: 8px; height: 8px; border-radius: 50%; }
     .dot-pending { background: var(--border); }
-    .dot-assembling { background: var(--accent); }
-    .dot-assembled { background: var(--success); }
-    .dot-staged { background: var(--purple); }
+    .dot-active { background: var(--accent); }
+    .dot-done { background: var(--success); }
+    .dot-terminal { background: var(--purple); }
     .bucket-row { font-size: 0.75rem; color: var(--muted); padding: 4px 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; }
     .bucket-row:last-child { border-bottom: none; }
     .feed-panel { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 12px; max-height: 80vh; overflow-y: auto; }
@@ -691,11 +709,12 @@ export const dashboardPage = page("Dashboard", `
     </div>
   </main>
 `, `
-    var STATION_NAMES = {
-      receiving: 'Receiving', kitting: 'Kitting', cnc: 'CNC', edge_banding: 'Edge Banding',
-      custom: 'Custom', finishing: 'Finishing', to_assembly: 'To Assembly',
-      assembly_start: 'Assembly Start', assembly_complete: 'Assembly Complete', staging: 'Staging'
-    };
+    ${stationNamesJS(config)}
+    var LABELS = ${JSON.stringify(config.entity_labels)};
+    var L3_STATUSES = ${JSON.stringify(config.l3_statuses)};
+    var TERMINAL = ${JSON.stringify(config.l3_terminal_status)};
+    ${displayStatusJS(config)}
+    ${STATUS_COLOR_JS}
 
     var jobsDiv = document.getElementById('jobs');
     var feedDiv = document.getElementById('feed');
@@ -712,17 +731,6 @@ export const dashboardPage = page("Dashboard", `
       return Math.floor(s / 86400) + 'd ago';
     }
 
-    function displayStatus(s) {
-      var m = { pending: 'Pending', in_progress: 'In Progress', complete: 'Complete' };
-      return m[s] || s;
-    }
-    function pillColor(s) {
-      if (s === 'pending') return 'yellow';
-      if (s === 'in_progress') return 'blue';
-      if (s === 'complete') return 'green';
-      return 'blue';
-    }
-
     function load() {
       Promise.all([
         fetch('/api/jobs?status=active').then(function(r) { return r.json(); }),
@@ -735,7 +743,7 @@ export const dashboardPage = page("Dashboard", `
           ? '<div style="color:var(--muted);font-size:0.8rem">No scans yet</div>'
           : feedRes.map(function(s) {
             var t = new Date(s.scanned_at + 'Z');
-            var detail = s.bucket_name ? s.bucket_name : s.cabinet_number ? 'Cab ' + s.cabinet_number : '';
+            var detail = s.bucket_name ? s.bucket_name : s.cabinet_number ? LABELS.l3 + ' ' + s.cabinet_number : '';
             return '<div class="feed-item">' +
               '<span class="feed-job">' + s.job_number + '</span> ' +
               '<span class="feed-station">' + (STATION_NAMES[s.station] || s.station) + '</span>' +
@@ -744,7 +752,7 @@ export const dashboardPage = page("Dashboard", `
           }).join('');
 
         if (jRes.length === 0) {
-          jobsDiv.innerHTML = '<div class="empty">No active jobs. <a href="/jobs/new">Create one</a></div>';
+          jobsDiv.innerHTML = '<div class="empty">No active ' + LABELS.l1.toLowerCase() + 's. <a href="/jobs/new">Create one</a></div>';
           updatedSpan.textContent = 'Updated ' + new Date().toLocaleTimeString();
           return;
         }
@@ -753,10 +761,11 @@ export const dashboardPage = page("Dashboard", `
           .then(function(details) {
             jobsDiv.innerHTML = details.map(function(job) {
               var total = job.cabinets.length || job.cabinet_count || 1;
-              var counts = { pending: 0, assembling: 0, assembled: 0, staged: 0 };
+              var counts = {};
+              L3_STATUSES.forEach(function(st) { counts[st] = 0; });
               job.cabinets.forEach(function(c) { counts[c.status] = (counts[c.status] || 0) + 1; });
-              var done = counts.assembled + counts.staged;
-              var pct = total > 0 ? Math.round((done / total) * 100) : 0;
+              var terminalCount = counts[TERMINAL] || 0;
+              var pct = total > 0 ? Math.round((terminalCount / total) * 100) : 0;
 
               var lastScan = job.scans[0];
               var lastInfo = lastScan
@@ -765,19 +774,19 @@ export const dashboardPage = page("Dashboard", `
                 : 'No scans yet';
 
               var bucketInfo = job.buckets.map(function(b) {
-                return '<div class="bucket-row"><span>' + b.name + '</span><span class="pill pill-' + pillColor(b.status) + '">' + displayStatus(b.status) + '</span></div>';
+                return '<div class="bucket-row"><span>' + b.name + '</span><span class="pill pill-' + statusColor(b.status) + '">' + displayStatus(b.status) + '</span></div>';
+              }).join('');
+
+              var statsHtml = L3_STATUSES.map(function(st, i) {
+                var dotClass = st === 'pending' ? 'dot-pending' : st === TERMINAL ? 'dot-terminal' : i === L3_STATUSES.length - 1 ? 'dot-done' : i > 0 ? 'dot-active' : 'dot-pending';
+                return '<div class="stat"><div class="dot ' + dotClass + '"></div>' + (counts[st] || 0) + ' ' + displayStatus(st).toLowerCase() + '</div>';
               }).join('');
 
               return '<div class="job-card">' +
                 '<div class="job-header"><h2>' + job.job_number + ' ' + job.job_name + '</h2>' +
                 '<a href="/job/' + job.id + '">Details</a></div>' +
                 '<div class="progress-bar"><div class="progress-fill green" style="width:' + pct + '%"></div></div>' +
-                '<div class="stats-row">' +
-                  '<div class="stat"><div class="dot dot-pending"></div>' + counts.pending + ' pending</div>' +
-                  '<div class="stat"><div class="dot dot-assembling"></div>' + counts.assembling + ' building</div>' +
-                  '<div class="stat"><div class="dot dot-assembled"></div>' + counts.assembled + ' done</div>' +
-                  '<div class="stat"><div class="dot dot-staged"></div>' + counts.staged + ' staged</div>' +
-                '</div>' +
+                '<div class="stats-row">' + statsHtml + '</div>' +
                 (bucketInfo ? '<div style="margin-top:10px">' + bucketInfo + '</div>' : '') +
                 '<div style="margin-top:8px;font-size:0.75rem;color:var(--muted)">Last: ' + lastInfo + '</div>' +
               '</div>';
@@ -795,9 +804,11 @@ export const dashboardPage = page("Dashboard", `
     load();
     startAuto();
 `);
+}
 
 // ─── STATION VIEW PAGE ──────────────────────────────────────
-export const stationViewPage = page("Station View", `
+export function stationViewPage(config: TenantConfig): string {
+  return page("Station View", `
     main { flex: 1; padding: 16px; max-width: 600px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
     .station-bar { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0; -webkit-overflow-scrolling: touch; }
     .station-chip {
@@ -828,20 +839,10 @@ export const stationViewPage = page("Station View", `
     <div id="items"></div>
   </main>
 `, `
-    var STATIONS = [
-      { slug: 'receiving', name: 'Receiving', level: 'job' },
-      { slug: 'kitting', name: 'Kitting', level: 'job' },
-      { slug: 'cnc', name: 'CNC', level: 'bucket' },
-      { slug: 'edge_banding', name: 'Edge Banding', level: 'bucket' },
-      { slug: 'custom', name: 'Custom', level: 'bucket' },
-      { slug: 'finishing', name: 'Finishing', level: 'bucket' },
-      { slug: 'to_assembly', name: 'To Assembly', level: 'bucket' },
-      { slug: 'assembly_start', name: 'Assembly Start', level: 'cabinet' },
-      { slug: 'assembly_complete', name: 'Assembly Complete', level: 'cabinet' },
-      { slug: 'staging', name: 'Staging', level: 'cabinet' },
-    ];
+    var STATIONS = ${JSON.stringify(config.stations)};
+    var LABELS = ${JSON.stringify(config.entity_labels)};
 
-    var selected = localStorage.getItem('stationView') || 'receiving';
+    var selected = localStorage.getItem('stationView') || STATIONS[0].slug;
     var bar = document.getElementById('station-bar');
     var itemsDiv = document.getElementById('items');
     var countDiv = document.getElementById('item-count');
@@ -870,48 +871,53 @@ export const stationViewPage = page("Station View", `
       return Math.floor(s / 86400) + 'd ago';
     }
 
+    function levelLabel(level) {
+      if (level === 'l1') return LABELS.l1.toLowerCase() + 's';
+      if (level === 'l2') return LABELS.l2.toLowerCase() + 's';
+      return LABELS.l3.toLowerCase() + 's';
+    }
+
     function load() {
       fetch('/api/stations/' + selected + '/items')
         .then(function(r) { return r.json(); })
         .then(function(data) {
           var items = data.items || [];
           var level = data.level;
-          var label = level === 'job' ? 'jobs' : level === 'bucket' ? 'buckets' : 'cabinets';
-          countDiv.textContent = items.length + ' ' + label + ' at this station';
+          countDiv.textContent = items.length + ' ' + levelLabel(level) + ' at this station';
 
           if (items.length === 0) {
             itemsDiv.innerHTML = '<div class="empty-state">Nothing here right now</div>';
             return;
           }
 
-          if (level === 'job') {
+          if (level === 'l1') {
             itemsDiv.innerHTML = items.map(function(j) {
               return '<div class="item-card"><div>' +
                 '<div class="primary">' + j.job_number + '</div>' +
                 '<div class="secondary">' + j.job_name + '</div>' +
                 '</div><div class="right">' +
-                '<div>' + j.cabinet_count + ' cabinets</div>' +
+                '<div>' + j.cabinet_count + ' ' + LABELS.l3.toLowerCase() + 's</div>' +
                 '<div>' + timeAgo(new Date(j.scanned_at + 'Z')) + '</div>' +
                 '<a href="/job/' + j.id + '">Details</a>' +
                 '</div></div>';
             }).join('');
-          } else if (level === 'bucket') {
+          } else if (level === 'l2') {
             itemsDiv.innerHTML = items.map(function(b) {
               return '<div class="item-card"><div>' +
                 '<div class="primary">' + b.name + '</div>' +
                 '<div class="secondary">' + b.job_number + ' ' + b.job_name + '</div>' +
                 '</div><div class="right">' +
-                '<div>' + b.cabinet_count + ' cabs</div>' +
+                '<div>' + b.cabinet_count + ' ' + LABELS.l3.toLowerCase() + 's</div>' +
                 '<div>' + timeAgo(new Date(b.scanned_at + 'Z')) + '</div>' +
                 '<a href="/job/' + b.job_id + '">Details</a>' +
                 '</div></div>';
             }).join('');
           } else {
             itemsDiv.innerHTML = items.map(function(cab) {
-              var label = cab.label || ('Cab ' + cab.cabinet_number);
+              var lbl = cab.label || (LABELS.l3 + ' ' + cab.cabinet_number);
               var bucket = cab.bucket_name ? ' / ' + cab.bucket_name : '';
               return '<div class="item-card"><div>' +
-                '<div class="primary">' + label + '</div>' +
+                '<div class="primary">' + lbl + '</div>' +
                 '<div class="secondary">' + cab.job_number + ' ' + cab.job_name + bucket + '</div>' +
                 '</div><div class="right">' +
                 '<div>' + timeAgo(new Date(cab.scanned_at + 'Z')) + '</div>' +
@@ -925,3 +931,4 @@ export const stationViewPage = page("Station View", `
     renderBar();
     load();
 `);
+}
