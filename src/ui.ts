@@ -228,14 +228,20 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
   const L3 = config.entity_labels.l3;
   return page("FabWorks", `
     main { flex: 1; padding: 16px; max-width: 480px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
-    .station-bar { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0; -webkit-overflow-scrolling: touch; }
-    .station-chip {
-      flex-shrink: 0; padding: 8px 12px; font-size: 0.75rem; font-weight: 600;
-      background: var(--bg); border: 2px solid var(--border); border-radius: 20px;
-      color: var(--muted); cursor: pointer; transition: all 0.15s; white-space: nowrap;
+    .station-carousel { display: flex; align-items: center; justify-content: center; gap: 0; user-select: none; }
+    .station-prev, .station-next {
+      flex: 1; font-size: 0.8rem; color: var(--muted); opacity: 0.4; cursor: pointer;
+      padding: 10px 8px; transition: opacity 0.2s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .station-chip:active { transform: scale(0.96); }
-    .station-chip.selected { border-color: var(--accent); background: rgba(59,130,246,0.15); color: var(--accent); }
+    .station-prev { text-align: right; }
+    .station-next { text-align: left; }
+    .station-prev:hover, .station-next:hover { opacity: 0.7; }
+    .station-current {
+      flex-shrink: 0; padding: 10px 20px; font-size: 1.1rem; font-weight: 700;
+      background: rgba(59,130,246,0.15); border: 2px solid var(--accent);
+      border-radius: 10px; color: var(--accent); text-align: center; min-width: 140px;
+    }
+    .station-seq { font-size: 0.6rem; font-weight: 400; color: var(--muted); display: block; margin-top: 2px; }
     .entity-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
     .entity-row {
       display: flex; justify-content: space-between; align-items: center;
@@ -287,8 +293,11 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
 `, `${NAV_NEW}${NAV_STATIONS}${NAV_DASH}<div class="user-menu"><button class="user-btn" id="user-btn">${user.name}</button><div class="user-dropdown" id="user-dropdown"><a href="#" id="logout-link">Log out</a></div></div>`, `
   <main>
     <div class="card">
-      <label>Your Station</label>
-      <div class="station-bar" id="station-bar"></div>
+      <div class="station-carousel" id="station-carousel">
+        <div class="station-prev" id="station-prev"></div>
+        <div class="station-current" id="station-current">Select Station</div>
+        <div class="station-next" id="station-next"></div>
+      </div>
     </div>
     <div class="card">
       <label>${config.entity_labels.l1}</label>
@@ -329,7 +338,9 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
     var jobData = null;
     var debounceTimer = null;
 
-    var stationBar = document.getElementById('station-bar');
+    var stationPrev = document.getElementById('station-prev');
+    var stationCurrent = document.getElementById('station-current');
+    var stationNext = document.getElementById('station-next');
     var jobInput = document.getElementById('job-input');
     var jobInfo = document.getElementById('job-info');
     var contextPanel = document.getElementById('context-panel');
@@ -359,21 +370,33 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
       return null;
     }
 
-    STATIONS.forEach(function(s) {
-      var chip = document.createElement('button');
-      chip.className = 'station-chip' + (s.slug === selectedStation ? ' selected' : '');
-      chip.textContent = s.name;
-      chip.dataset.slug = s.slug;
-      chip.addEventListener('click', function() {
-        selectedStation = s.slug;
-        localStorage.setItem('fw_station', s.slug);
-        document.querySelectorAll('.station-chip').forEach(function(c) { c.classList.toggle('selected', c.dataset.slug === s.slug); });
-        selectedEntityId = null;
-        loadJobContext();
-        updateScanBtn();
-      });
-      stationBar.appendChild(chip);
-    });
+    function stationIdx() {
+      for (var i = 0; i < STATIONS.length; i++) { if (STATIONS[i].slug === selectedStation) return i; }
+      return 0;
+    }
+
+    function renderCarousel() {
+      var idx = stationIdx();
+      var s = STATIONS[idx];
+      stationCurrent.innerHTML = s.name + '<span class="station-seq">' + (idx + 1) + ' of ' + STATIONS.length + '</span>';
+      stationPrev.textContent = idx > 0 ? STATIONS[idx - 1].name : '';
+      stationNext.textContent = idx < STATIONS.length - 1 ? STATIONS[idx + 1].name : '';
+    }
+
+    function selectStation(slug) {
+      selectedStation = slug;
+      localStorage.setItem('fw_station', slug);
+      selectedEntityId = null;
+      renderCarousel();
+      loadJobContext();
+      updateScanBtn();
+    }
+
+    if (!selectedStation) selectStation(STATIONS[0].slug);
+    renderCarousel();
+
+    stationPrev.addEventListener('click', function() { var i = stationIdx(); if (i > 0) selectStation(STATIONS[i - 1].slug); });
+    stationNext.addEventListener('click', function() { var i = stationIdx(); if (i < STATIONS.length - 1) selectStation(STATIONS[i + 1].slug); });
 
     jobInput.addEventListener('input', function() {
       clearTimeout(debounceTimer);
@@ -617,21 +640,10 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
 
     function cycleStation(dir) {
       if (!STATIONS.length) return;
-      var idx = -1;
-      for (var i = 0; i < STATIONS.length; i++) {
-        if (STATIONS[i].slug === selectedStation) { idx = i; break; }
-      }
-      if (idx === -1) idx = 0;
-      else idx = (idx + dir + STATIONS.length) % STATIONS.length;
+      var idx = stationIdx();
+      idx = (idx + dir + STATIONS.length) % STATIONS.length;
       var s = STATIONS[idx];
-      selectedStation = s.slug;
-      localStorage.setItem('fw_station', s.slug);
-      document.querySelectorAll('.station-chip').forEach(function(c) { c.classList.toggle('selected', c.dataset.slug === s.slug); });
-      var chip = document.querySelector('.station-chip[data-slug="' + s.slug + '"]');
-      if (chip) chip.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-      selectedEntityId = null;
-      loadJobContext();
-      updateScanBtn();
+      selectStation(s.slug);
       showToast(dir > 0 ? s.name + ' →' : '← ' + s.name);
     }
 
@@ -1168,14 +1180,20 @@ export function dashboardPage(config: TenantConfig): string {
 export function stationViewPage(config: TenantConfig): string {
   return page("Station View", `
     main { flex: 1; padding: 16px; max-width: 600px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
-    .station-bar { display: flex; gap: 6px; overflow-x: auto; padding: 4px 0; -webkit-overflow-scrolling: touch; }
-    .station-chip {
-      flex-shrink: 0; padding: 8px 12px; font-size: 0.75rem; font-weight: 600;
-      background: var(--bg); border: 2px solid var(--border); border-radius: 20px;
-      color: var(--muted); cursor: pointer; transition: all 0.15s; white-space: nowrap;
+    .station-carousel { display: flex; align-items: center; justify-content: center; gap: 0; user-select: none; }
+    .station-prev, .station-next {
+      flex: 1; font-size: 0.8rem; color: var(--muted); opacity: 0.4; cursor: pointer;
+      padding: 10px 8px; transition: opacity 0.2s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .station-chip:active { transform: scale(0.96); }
-    .station-chip.selected { border-color: var(--accent); background: rgba(59,130,246,0.15); color: var(--accent); }
+    .station-prev { text-align: right; }
+    .station-next { text-align: left; }
+    .station-prev:hover, .station-next:hover { opacity: 0.7; }
+    .station-current {
+      flex-shrink: 0; padding: 10px 20px; font-size: 1.1rem; font-weight: 700;
+      background: rgba(59,130,246,0.15); border: 2px solid var(--accent);
+      border-radius: 10px; color: var(--accent); text-align: center; min-width: 140px;
+    }
+    .station-seq { font-size: 0.6rem; font-weight: 400; color: var(--muted); display: block; margin-top: 2px; }
     .level-label { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 8px 0 2px; }
     .item-card {
       background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
@@ -1197,8 +1215,11 @@ export function stationViewPage(config: TenantConfig): string {
 `, `${NAV_SCAN}${NAV_NEW}${NAV_DASH}`, `
   <main>
     <div class="card">
-      <label>Station</label>
-      <div class="station-bar" id="station-bar"></div>
+      <div class="station-carousel" id="station-carousel">
+        <div class="station-prev" id="station-prev"></div>
+        <div class="station-current" id="station-current">Select Station</div>
+        <div class="station-next" id="station-next"></div>
+      </div>
     </div>
     <div id="item-count" style="font-size:0.8rem;color:var(--muted)"></div>
     <div id="items"></div>
@@ -1209,25 +1230,34 @@ export function stationViewPage(config: TenantConfig): string {
     var LABELS = ${JSON.stringify(config.entity_labels)};
 
     var selected = localStorage.getItem('stationView') || STATIONS[0].slug;
-    var bar = document.getElementById('station-bar');
+    var svPrev = document.getElementById('station-prev');
+    var svCurrent = document.getElementById('station-current');
+    var svNext = document.getElementById('station-next');
     var itemsDiv = document.getElementById('items');
     var countDiv = document.getElementById('item-count');
 
-    function renderBar() {
-      bar.innerHTML = STATIONS.map(function(s) {
-        return '<div class="station-chip' + (s.slug === selected ? ' selected' : '') +
-          '" data-slug="' + s.slug + '">' + s.name + '</div>';
-      }).join('');
+    function svIdx() {
+      for (var i = 0; i < STATIONS.length; i++) { if (STATIONS[i].slug === selected) return i; }
+      return 0;
     }
 
-    bar.addEventListener('click', function(e) {
-      var chip = e.target.closest('.station-chip');
-      if (!chip) return;
-      selected = chip.dataset.slug;
-      localStorage.setItem('stationView', selected);
-      renderBar();
+    function renderCarousel() {
+      var idx = svIdx();
+      var s = STATIONS[idx];
+      svCurrent.innerHTML = s.name + '<span class="station-seq">' + (idx + 1) + ' of ' + STATIONS.length + '</span>';
+      svPrev.textContent = idx > 0 ? STATIONS[idx - 1].name : '';
+      svNext.textContent = idx < STATIONS.length - 1 ? STATIONS[idx + 1].name : '';
+    }
+
+    function selectStation(slug) {
+      selected = slug;
+      localStorage.setItem('stationView', slug);
+      renderCarousel();
       load();
-    });
+    }
+
+    svPrev.addEventListener('click', function() { var i = svIdx(); if (i > 0) selectStation(STATIONS[i - 1].slug); });
+    svNext.addEventListener('click', function() { var i = svIdx(); if (i < STATIONS.length - 1) selectStation(STATIONS[i + 1].slug); });
 
     function timeAgo(date) {
       var s = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -1294,7 +1324,7 @@ export function stationViewPage(config: TenantConfig): string {
         });
     }
 
-    renderBar();
+    renderCarousel();
     load();
 
     // --- Swipe gestures ---
@@ -1308,19 +1338,10 @@ export function stationViewPage(config: TenantConfig): string {
     }
 
     function cycleStation(dir) {
-      var idx = -1;
-      for (var i = 0; i < STATIONS.length; i++) {
-        if (STATIONS[i].slug === selected) { idx = i; break; }
-      }
-      if (idx === -1) idx = 0;
-      else idx = (idx + dir + STATIONS.length) % STATIONS.length;
+      var idx = svIdx();
+      idx = (idx + dir + STATIONS.length) % STATIONS.length;
       var s = STATIONS[idx];
-      selected = s.slug;
-      localStorage.setItem('stationView', s.slug);
-      renderBar();
-      var chip = document.querySelector('.station-chip[data-slug="' + s.slug + '"]');
-      if (chip) chip.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
-      load();
+      selectStation(s.slug);
       showToast(dir > 0 ? s.name + ' →' : '← ' + s.name);
     }
 
