@@ -183,6 +183,13 @@ export function scanPage(config: TenantConfig): string {
     .remember-label { font-size: 0.75rem; color: var(--muted); display: flex; align-items: center; gap: 4px; white-space: nowrap; }
     .section-label { font-size: 0.75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
     #context-panel { display: none; }
+    .swipe-toast {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      background: var(--surface); border: 1px solid var(--accent); border-radius: 12px;
+      padding: 12px 24px; font-size: 1rem; font-weight: 700; color: var(--accent);
+      opacity: 0; transition: opacity 0.2s; pointer-events: none; z-index: 100;
+    }
+    .swipe-toast.show { opacity: 1; }
 `, `${NAV_NEW}${NAV_STATIONS}${NAV_DASH}`, `
   <main>
     <div class="card">
@@ -207,6 +214,7 @@ export function scanPage(config: TenantConfig): string {
     </div>
     <button class="btn btn-primary" id="scan-btn" disabled>Log Scan</button>
     <div class="result" id="result"></div>
+    <div class="swipe-toast" id="swipe-toast"></div>
   </main>
 `, `
     var STATIONS = ${JSON.stringify(config.stations)};
@@ -382,6 +390,77 @@ export function scanPage(config: TenantConfig): string {
         updateScanBtn();
       });
     });
+
+    // --- Swipe gestures ---
+    var swipeToast = document.getElementById('swipe-toast');
+    var toastTimer = null;
+    function showToast(msg) {
+      swipeToast.textContent = msg;
+      swipeToast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(function() { swipeToast.classList.remove('show'); }, 600);
+    }
+
+    function cycleStation(dir) {
+      if (!STATIONS.length) return;
+      var idx = -1;
+      for (var i = 0; i < STATIONS.length; i++) {
+        if (STATIONS[i].slug === selectedStation) { idx = i; break; }
+      }
+      if (idx === -1) idx = 0;
+      else idx = (idx + dir + STATIONS.length) % STATIONS.length;
+      var s = STATIONS[idx];
+      selectedStation = s.slug;
+      localStorage.setItem('fw_station', s.slug);
+      document.querySelectorAll('.station-chip').forEach(function(c) { c.classList.toggle('selected', c.dataset.slug === s.slug); });
+      var chip = document.querySelector('.station-chip[data-slug="' + s.slug + '"]');
+      if (chip) chip.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+      selectedEntityId = null;
+      loadJobContext();
+      updateScanBtn();
+      showToast(dir > 0 ? s.name + ' →' : '← ' + s.name);
+    }
+
+    var touchStartX = 0, touchStartY = 0, swiping = false;
+    document.addEventListener('touchstart', function(e) {
+      var tag = e.target.tagName;
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'BUTTON') return;
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+      swiping = true;
+    }, { passive: true });
+
+    document.addEventListener('touchmove', function(e) {
+      if (!swiping) return;
+      var dx = e.touches[0].clientX - touchStartX;
+      var dy = e.touches[0].clientY - touchStartY;
+      if (Math.abs(dx) > 30 && Math.abs(dx) > Math.abs(dy)) {
+        e.preventDefault();
+      }
+    }, { passive: false });
+
+    document.addEventListener('touchend', function(e) {
+      if (!swiping) return;
+      swiping = false;
+      var dx = e.changedTouches[0].clientX - touchStartX;
+      var dy = e.changedTouches[0].clientY - touchStartY;
+      var absDx = Math.abs(dx), absDy = Math.abs(dy);
+      if (absDx < 50 && absDy < 50) return;
+
+      if (absDx > absDy) {
+        cycleStation(dx < 0 ? 1 : -1);
+      } else if (dy < -50) {
+        scanBtn.click();
+      } else if (dy > 50) {
+        if (jobData) {
+          fetch('/api/jobs/' + jobData.id).then(function(r) { return r.json(); }).then(function(detail) {
+            jobData = detail;
+            loadJobContext();
+            showToast('Refreshed');
+          });
+        }
+      }
+    }, { passive: true });
 `);
 }
 
@@ -829,6 +908,13 @@ export function stationViewPage(config: TenantConfig): string {
     .item-card a { color: var(--accent); text-decoration: none; font-size: 0.75rem; }
     .count-badge { font-size: 0.7rem; font-weight: 700; background: rgba(59,130,246,0.15); color: var(--accent); padding: 2px 8px; border-radius: 10px; margin-left: 6px; }
     .empty-state { text-align: center; padding: 48px 16px; color: var(--muted); font-size: 0.9rem; }
+    .swipe-toast {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      background: var(--surface); border: 1px solid var(--accent); border-radius: 12px;
+      padding: 12px 24px; font-size: 1rem; font-weight: 700; color: var(--accent);
+      opacity: 0; transition: opacity 0.2s; pointer-events: none; z-index: 100;
+    }
+    .swipe-toast.show { opacity: 1; }
 `, `${NAV_SCAN}${NAV_NEW}${NAV_DASH}`, `
   <main>
     <div class="card">
@@ -837,6 +923,7 @@ export function stationViewPage(config: TenantConfig): string {
     </div>
     <div id="item-count" style="font-size:0.8rem;color:var(--muted)"></div>
     <div id="items"></div>
+    <div class="swipe-toast" id="swipe-toast"></div>
   </main>
 `, `
     var STATIONS = ${JSON.stringify(config.stations)};
@@ -930,5 +1017,66 @@ export function stationViewPage(config: TenantConfig): string {
 
     renderBar();
     load();
+
+    // --- Swipe gestures ---
+    var swipeToast = document.getElementById('swipe-toast');
+    var toastTimer = null;
+    function showToast(msg) {
+      swipeToast.textContent = msg;
+      swipeToast.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(function() { swipeToast.classList.remove('show'); }, 600);
+    }
+
+    function cycleStation(dir) {
+      var idx = -1;
+      for (var i = 0; i < STATIONS.length; i++) {
+        if (STATIONS[i].slug === selected) { idx = i; break; }
+      }
+      if (idx === -1) idx = 0;
+      else idx = (idx + dir + STATIONS.length) % STATIONS.length;
+      var s = STATIONS[idx];
+      selected = s.slug;
+      localStorage.setItem('stationView', s.slug);
+      renderBar();
+      var chip = document.querySelector('.station-chip[data-slug="' + s.slug + '"]');
+      if (chip) chip.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+      load();
+      showToast(dir > 0 ? s.name + ' →' : '← ' + s.name);
+    }
+
+    var touchStartX = 0, touchStartY = 0, swiping = false;
+    document.addEventListener('touchstart', function(e) {
+      var tag = e.target.tagName;
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'BUTTON') return;
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+      swiping = true;
+    }, { passive: true });
+
+    document.addEventListener('touchmove', function(e) {
+      if (!swiping) return;
+      var dx = e.touches[0].clientX - touchStartX;
+      var dy = e.touches[0].clientY - touchStartY;
+      if (Math.abs(dx) > 30 && Math.abs(dx) > Math.abs(dy)) {
+        e.preventDefault();
+      }
+    }, { passive: false });
+
+    document.addEventListener('touchend', function(e) {
+      if (!swiping) return;
+      swiping = false;
+      var dx = e.changedTouches[0].clientX - touchStartX;
+      var dy = e.changedTouches[0].clientY - touchStartY;
+      var absDx = Math.abs(dx), absDy = Math.abs(dy);
+      if (absDx < 50 && absDy < 50) return;
+
+      if (absDx > absDy) {
+        cycleStation(dx < 0 ? 1 : -1);
+      } else if (dy > 50) {
+        load();
+        showToast('Refreshed');
+      }
+    }, { passive: true });
 `);
 }
