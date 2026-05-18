@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage } from "./ui";
+import { getCookie, setCookie, deleteCookie } from "hono/cookie";
+import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage } from "./ui";
 
 // --- Types ---
 
@@ -20,7 +21,16 @@ type TenantConfig = {
   l3_terminal_status: string;
 };
 
-export type { TenantConfig, StationDef };
+type UserRole = "user" | "lead" | "supervisor" | "admin";
+
+type SessionUser = {
+  id: number;
+  name: string;
+  email: string;
+  role: UserRole;
+};
+
+export type { TenantConfig, StationDef, UserRole, SessionUser };
 
 // --- Shop Templates ---
 
@@ -108,10 +118,42 @@ async function loadConfig(db: D1Database): Promise<TenantConfig> {
   return cachedConfig;
 }
 
+// --- Auth Helpers ---
+
+const ROLE_LEVELS: Record<UserRole, number> = { user: 0, lead: 1, supervisor: 2, admin: 3 };
+const SESSION_TTL_DAYS = 30;
+
+function generateSessionId(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function hashPin(pin: string): Promise<string> {
+  const data = new TextEncoder().encode(pin);
+  const hash = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function getSessionUser(db: D1Database, sessionId: string | undefined): Promise<SessionUser | null> {
+  if (!sessionId) return null;
+  const row = await db.prepare(
+    `SELECT u.id, u.name, u.email, u.role FROM sessions s
+     JOIN users u ON s.user_id = u.id
+     WHERE s.id = ? AND s.expires_at > datetime('now') AND u.active = 1`
+  ).bind(sessionId).first<SessionUser>();
+  return row || null;
+}
+
+function hasRole(user: SessionUser | null, minRole: UserRole): boolean {
+  if (!user) return false;
+  return ROLE_LEVELS[user.role] >= ROLE_LEVELS[minRole];
+}
+
 // --- App ---
 
 type Bindings = { DB: D1Database };
-type Variables = { config: TenantConfig };
+type Variables = { config: TenantConfig; user: SessionUser | null };
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
 app.use("*", cors());
@@ -119,16 +161,114 @@ app.use("*", cors());
 app.use("*", async (c, next) => {
   const config = await loadConfig(c.env.DB);
   c.set("config", config);
+  const sid = getCookie(c, "fw_session");
+  const user = await getSessionUser(c.env.DB, sid);
+  c.set("user", user);
   await next();
 });
 
+function requireAuth(minRole: UserRole = "user") {
+  return async (c: any, next: any) => {
+    const user = c.get("user") as SessionUser | null;
+    if (!user) {
+      if (c.req.path.startsWith("/api/")) return c.json({ error: "Not authenticated" }, 401);
+      return c.redirect("/login");
+    }
+    if (!hasRole(user, minRole)) {
+      if (c.req.path.startsWith("/api/")) return c.json({ error: "Insufficient role" }, 403);
+      return c.redirect("/");
+    }
+    await next();
+  };
+}
+
 app.get("/api/health", (c) => c.json({ status: "ok", service: "fabworks" }));
+
+// --- Auth API ---
+
+app.post("/api/auth/login", async (c) => {
+  const { email, pin } = await c.req.json<{ email: string; pin: string }>();
+  if (!email || !pin) return c.json({ error: "Email and PIN required" }, 400);
+
+  const pinHash = await hashPin(pin);
+  const user = await c.env.DB.prepare(
+    "SELECT id, name, email, role FROM users WHERE email = ? COLLATE NOCASE AND pin = ? AND active = 1"
+  ).bind(email.trim(), pinHash).first<SessionUser>();
+  if (!user) return c.json({ error: "Invalid email or PIN" }, 401);
+
+  const sid = generateSessionId();
+  const expires = new Date(Date.now() + SESSION_TTL_DAYS * 86400_000).toISOString().replace("T", " ").slice(0, 19);
+  await c.env.DB.prepare("INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)").bind(sid, user.id, expires).run();
+
+  setCookie(c, "fw_session", sid, { path: "/", httpOnly: true, secure: true, sameSite: "Lax", maxAge: SESSION_TTL_DAYS * 86400 });
+  return c.json({ user });
+});
+
+app.post("/api/auth/logout", async (c) => {
+  const sid = getCookie(c, "fw_session");
+  if (sid) {
+    await c.env.DB.prepare("DELETE FROM sessions WHERE id = ?").bind(sid).run();
+    deleteCookie(c, "fw_session", { path: "/" });
+  }
+  return c.json({ ok: true });
+});
+
+app.get("/api/auth/me", (c) => {
+  const user = c.get("user");
+  if (!user) return c.json({ error: "Not authenticated" }, 401);
+  return c.json(user);
+});
+
+// --- User Management (admin only) ---
+
+app.get("/api/users", requireAuth("admin"), async (c) => {
+  const result = await c.env.DB.prepare("SELECT id, name, email, role, active, created_at FROM users ORDER BY name").all();
+  return c.json(result.results);
+});
+
+app.post("/api/users", requireAuth("admin"), async (c) => {
+  const { name, email, pin, role } = await c.req.json<{ name: string; email: string; pin: string; role?: UserRole }>();
+  if (!name || !email || !pin) return c.json({ error: "name, email, and pin required" }, 400);
+  if (pin.length < 4) return c.json({ error: "PIN must be at least 4 characters" }, 400);
+
+  const pinHash = await hashPin(pin);
+  const result = await c.env.DB.prepare(
+    "INSERT INTO users (name, email, pin, role) VALUES (?, ?, ?, ?) RETURNING id, name, email, role, active, created_at"
+  ).bind(name.trim(), email.trim(), pinHash, role || "user").first();
+  return c.json(result, 201);
+});
+
+app.put("/api/users/:id", requireAuth("admin"), async (c) => {
+  const userId = c.req.param("id");
+  const body = await c.req.json<{ name?: string; email?: string; pin?: string; role?: UserRole; active?: boolean }>();
+
+  const updates: string[] = [];
+  const binds: unknown[] = [];
+
+  if (body.name) { updates.push("name = ?"); binds.push(body.name.trim()); }
+  if (body.email) { updates.push("email = ?"); binds.push(body.email.trim()); }
+  if (body.pin) {
+    if (body.pin.length < 4) return c.json({ error: "PIN must be at least 4 characters" }, 400);
+    updates.push("pin = ?"); binds.push(await hashPin(body.pin));
+  }
+  if (body.role) { updates.push("role = ?"); binds.push(body.role); }
+  if (body.active !== undefined) { updates.push("active = ?"); binds.push(body.active ? 1 : 0); }
+
+  if (updates.length === 0) return c.json({ error: "Nothing to update" }, 400);
+  binds.push(userId);
+
+  const result = await c.env.DB.prepare(
+    `UPDATE users SET ${updates.join(", ")} WHERE id = ? RETURNING id, name, email, role, active, created_at`
+  ).bind(...binds).first();
+  if (!result) return c.json({ error: "User not found" }, 404);
+  return c.json(result);
+});
 
 // --- Config API ---
 
 app.get("/api/config", (c) => c.json(c.get("config")));
 
-app.put("/api/config", async (c) => {
+app.put("/api/config", requireAuth("admin"), async (c) => {
   const body = await c.req.json<Partial<TenantConfig>>();
   const current = c.get("config");
 
@@ -154,7 +294,7 @@ app.put("/api/config", async (c) => {
   return c.json(updated);
 });
 
-app.post("/api/config/reset", async (c) => {
+app.post("/api/config/reset", requireAuth("admin"), async (c) => {
   const { shop_type } = await c.req.json<{ shop_type: string }>();
   const tpl = SHOP_TEMPLATES[shop_type];
   if (!tpl) return c.json({ error: `Unknown shop type: ${shop_type}. Available: ${Object.keys(SHOP_TEMPLATES).join(", ")}` }, 400);
@@ -517,10 +657,15 @@ app.get("/api/stations/:slug/items", async (c) => {
 
 // --- Pages ---
 
-app.get("/", (c) => c.html(scanPage(c.get("config"))));
-app.get("/jobs/new", (c) => c.html(newJobPage(c.get("config"))));
-app.get("/dashboard", (c) => c.html(dashboardPage(c.get("config"))));
-app.get("/job/:id", (c) => c.html(jobDetailPage(c.get("config"))));
-app.get("/stations", (c) => c.html(stationViewPage(c.get("config"))));
+app.get("/login", (c) => {
+  if (c.get("user")) return c.redirect("/");
+  return c.html(loginPage());
+});
+app.get("/", requireAuth(), (c) => c.html(scanPage(c.get("config"), c.get("user")!)));
+app.get("/jobs/new", requireAuth(), (c) => c.html(newJobPage(c.get("config"))));
+app.get("/dashboard", requireAuth(), (c) => c.html(dashboardPage(c.get("config"))));
+app.get("/job/:id", requireAuth(), (c) => c.html(jobDetailPage(c.get("config"))));
+app.get("/stations", requireAuth(), (c) => c.html(stationViewPage(c.get("config"))));
+app.get("/job/:id/progress", requireAuth(), (c) => c.html(progressPage(c.get("config"))));
 
 export default app;

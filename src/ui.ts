@@ -1,4 +1,4 @@
-import type { TenantConfig } from "./index";
+import type { TenantConfig, SessionUser } from "./index";
 
 const SHARED_STYLES = `
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -156,8 +156,74 @@ const STATUS_COLOR_JS = `
       return 'blue';
     }`;
 
+// ─── LOGIN PAGE ────────────────────────────────────────────
+export function loginPage(): string {
+  return page("Login", `
+    main { flex: 1; display: flex; align-items: center; justify-content: center; padding: 16px; }
+    .login-card { width: 100%; max-width: 360px; }
+    .login-card h2 { font-size: 1.4rem; margin-bottom: 20px; text-align: center; }
+    .login-card .field { margin-bottom: 16px; }
+    .login-error { color: var(--error); font-size: 0.85rem; text-align: center; margin-top: 8px; display: none; }
+  `, "", `
+  <main>
+    <div class="card login-card">
+      <h2>FabWorks</h2>
+      <div class="field">
+        <label>Email</label>
+        <input type="text" id="email" placeholder="you@example.com" autocomplete="email" autocapitalize="none">
+      </div>
+      <div class="field">
+        <label>PIN</label>
+        <input type="text" id="pin" placeholder="Your PIN" inputmode="numeric" autocomplete="current-password">
+      </div>
+      <button class="btn btn-primary" id="login-btn">Log In</button>
+      <div class="login-error" id="error"></div>
+    </div>
+  </main>
+  `, `
+    var emailInput = document.getElementById('email');
+    var pinInput = document.getElementById('pin');
+    var loginBtn = document.getElementById('login-btn');
+    var errorDiv = document.getElementById('error');
+
+    var savedEmail = localStorage.getItem('fw_email');
+    if (savedEmail) emailInput.value = savedEmail;
+
+    function doLogin() {
+      errorDiv.style.display = 'none';
+      loginBtn.disabled = true;
+      loginBtn.textContent = 'Logging in...';
+      fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: emailInput.value.trim(), pin: pinInput.value.trim() }),
+      }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+      .then(function(r) {
+        if (r.ok) {
+          localStorage.setItem('fw_email', emailInput.value.trim());
+          localStorage.setItem('fw_name', r.data.user.name);
+          window.location.href = '/';
+        } else {
+          errorDiv.textContent = r.data.error;
+          errorDiv.style.display = 'block';
+          loginBtn.disabled = false;
+          loginBtn.textContent = 'Log In';
+        }
+      }).catch(function() {
+        errorDiv.textContent = 'Network error';
+        errorDiv.style.display = 'block';
+        loginBtn.disabled = false;
+        loginBtn.textContent = 'Log In';
+      });
+    }
+
+    loginBtn.addEventListener('click', doLogin);
+    pinInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') doLogin(); });
+  `);
+}
+
 // ─── SCAN PAGE ────────────────────────────────────────────
-export function scanPage(config: TenantConfig): string {
+export function scanPage(config: TenantConfig, user: SessionUser): string {
   const L2 = config.entity_labels.l2;
   const L3 = config.entity_labels.l3;
   return page("FabWorks", `
@@ -211,7 +277,14 @@ export function scanPage(config: TenantConfig): string {
       opacity: 0; transition: opacity 0.2s; pointer-events: none; z-index: 100;
     }
     .swipe-toast.show { opacity: 1; }
-`, `${NAV_NEW}${NAV_STATIONS}${NAV_DASH}`, `
+    .user-menu { position: relative; }
+    .user-btn { background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); font-size: 0.75rem; padding: 4px 10px; cursor: pointer; }
+    .user-btn:hover { color: var(--text); border-color: var(--accent); }
+    .user-dropdown { display: none; position: absolute; right: 0; top: 100%; margin-top: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; min-width: 140px; z-index: 50; overflow: hidden; }
+    .user-dropdown.open { display: block; }
+    .user-dropdown a { display: block; padding: 10px 14px; color: var(--text); text-decoration: none; font-size: 0.8rem; }
+    .user-dropdown a:hover { background: var(--bg); }
+`, `${NAV_NEW}${NAV_STATIONS}${NAV_DASH}<div class="user-menu"><button class="user-btn" id="user-btn">${user.name}</button><div class="user-dropdown" id="user-dropdown"><a href="#" id="logout-link">Log out</a></div></div>`, `
   <main>
     <div class="card">
       <label>Your Station</label>
@@ -267,8 +340,17 @@ export function scanPage(config: TenantConfig): string {
     var scannedByInput = document.getElementById('scanned-by');
     var rememberCheck = document.getElementById('remember-name');
 
-    var savedName = localStorage.getItem('fw_name');
-    if (savedName) scannedByInput.value = savedName;
+    scannedByInput.value = ${JSON.stringify(user.name)};
+
+    // User menu
+    var userBtn = document.getElementById('user-btn');
+    var userDrop = document.getElementById('user-dropdown');
+    userBtn.addEventListener('click', function(e) { e.stopPropagation(); userDrop.classList.toggle('open'); });
+    document.addEventListener('click', function() { userDrop.classList.remove('open'); });
+    document.getElementById('logout-link').addEventListener('click', function(e) {
+      e.preventDefault();
+      fetch('/api/auth/logout', { method: 'POST' }).then(function() { window.location.href = '/login'; });
+    });
 
     function getStation(slug) {
       for (var i = 0; i < STATIONS.length; i++) {
@@ -748,6 +830,7 @@ export function jobDetailPage(config: TenantConfig): string {
         <div class="job-meta" id="job-meta"></div>
         <div style="margin-top:8px">
           <button class="btn btn-sm" id="print-labels-btn" style="background:var(--accent);color:white">Print QR Labels</button>
+          <a class="btn btn-sm" id="progress-link" style="background:var(--purple);color:white;text-decoration:none;display:inline-block;margin-left:6px">Progress Matrix</a>
         </div>
       </div>
       <div id="labels-panel">
@@ -801,6 +884,7 @@ export function jobDetailPage(config: TenantConfig): string {
         content.style.gap = '16px';
 
         document.getElementById('job-title').textContent = job.job_number + ' ' + job.job_name;
+        document.getElementById('progress-link').href = '/job/' + job.id + '/progress';
         document.getElementById('job-meta').textContent =
           job.cabinet_count + ' total ' + LABELS.l3.toLowerCase() + 's — ' + job.buckets.length + ' ' + LABELS.l2.toLowerCase() + 's — ' + job.cabinets.length + ' ' + LABELS.l3.toLowerCase() + 's entered';
 
@@ -1274,4 +1358,167 @@ export function stationViewPage(config: TenantConfig): string {
       }
     }, { passive: true });
 `);
+}
+
+// ─── PROGRESS MATRIX PAGE ──────────────────────────────────
+export function progressPage(config: TenantConfig): string {
+  const L2 = config.entity_labels.l2;
+  const L3 = config.entity_labels.l3;
+  return page(`${config.entity_labels.l1} Progress`, `
+    main { flex: 1; padding: 16px; max-width: 1200px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+    .job-header-row { display: flex; justify-content: space-between; align-items: baseline; }
+    .job-header-row h2 { font-size: 1.2rem; }
+    .job-header-row a { color: var(--accent); text-decoration: none; font-size: 0.8rem; }
+    .matrix-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .matrix { border-collapse: collapse; width: 100%; min-width: 600px; font-size: 0.75rem; }
+    .matrix th, .matrix td { padding: 8px 6px; text-align: center; border-bottom: 1px solid var(--border); white-space: nowrap; }
+    .matrix th { color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.03em; font-size: 0.65rem; position: sticky; top: 0; background: var(--surface); }
+    .matrix th:first-child, .matrix td:first-child { text-align: left; position: sticky; left: 0; background: var(--surface); z-index: 1; min-width: 140px; }
+    .matrix th:first-child { z-index: 2; }
+    .matrix .bucket-row td { background: var(--bg); font-weight: 700; font-size: 0.8rem; cursor: pointer; }
+    .matrix .bucket-row td:first-child::before { content: '▸ '; color: var(--muted); }
+    .matrix .bucket-row.expanded td:first-child::before { content: '▾ '; }
+    .matrix .cab-row.hidden { display: none; }
+    .matrix .cab-row td:first-child { padding-left: 20px; color: var(--muted); }
+    .dot { display: inline-block; width: 14px; height: 14px; border-radius: 50%; }
+    .dot-none { background: var(--border); opacity: 0.3; }
+    .dot-scanned { background: var(--success); }
+    .dot-current { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+    .summary { font-size: 0.8rem; color: var(--muted); }
+    .summary .done { color: var(--success); font-weight: 600; }
+  `, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_DASH}`, `
+  <main>
+    <div id="loading" style="color:var(--muted);text-align:center;padding:48px">Loading...</div>
+    <div id="content" style="display:none">
+      <div class="card">
+        <div class="job-header-row">
+          <h2 id="job-title"></h2>
+          <a id="detail-link" href="#">Details</a>
+        </div>
+        <div class="summary" id="summary"></div>
+      </div>
+      <div class="card">
+        <div class="matrix-wrap">
+          <table class="matrix" id="matrix"></table>
+        </div>
+      </div>
+    </div>
+  </main>
+  `, `
+    var STATIONS = ${JSON.stringify(config.stations)};
+    var LABELS = ${JSON.stringify(config.entity_labels)};
+    var TERMINAL = ${JSON.stringify(config.l3_terminal_status)};
+
+    var jobId = window.location.pathname.split('/')[2];
+
+    fetch('/api/jobs/' + jobId).then(function(r) { return r.json(); }).then(function(job) {
+      if (job.error) { document.getElementById('loading').textContent = job.error; return; }
+
+      document.getElementById('loading').style.display = 'none';
+      var content = document.getElementById('content');
+      content.style.display = 'flex';
+      content.style.flexDirection = 'column';
+      content.style.gap = '16px';
+
+      document.getElementById('job-title').textContent = job.job_number + ' ' + job.job_name;
+      document.getElementById('detail-link').href = '/job/' + job.id;
+
+      var scanned = {};
+      job.scans.forEach(function(s) {
+        if (s.cabinet_id) scanned['l3:' + s.cabinet_id + ':' + s.station] = true;
+        if (s.bucket_id) scanned['l2:' + s.bucket_id + ':' + s.station] = true;
+        scanned['l1:' + s.job_id + ':' + s.station] = true;
+      });
+
+      function currentStation(type, id) {
+        var maxSeq = -1;
+        STATIONS.forEach(function(st) {
+          if (scanned[type + ':' + id + ':' + st.slug] && st.seq > maxSeq) maxSeq = st.seq;
+        });
+        return maxSeq;
+      }
+
+      var totalCabs = job.cabinets.length;
+      var doneCabs = job.cabinets.filter(function(c) { return c.status === TERMINAL; }).length;
+      document.getElementById('summary').innerHTML = '<span class="done">' + doneCabs + '</span> / ' + totalCabs + ' ' + LABELS.l3.toLowerCase() + 's at terminal (' + TERMINAL + ')';
+
+      var table = document.getElementById('matrix');
+      var thead = '<tr><th>' + LABELS.l3 + '</th>';
+      STATIONS.forEach(function(st) { thead += '<th>' + st.name + '</th>'; });
+      thead += '</tr>';
+
+      var tbody = '';
+      var bucketMap = {};
+      var noBucket = [];
+      job.cabinets.forEach(function(c) {
+        if (c.bucket_id) {
+          if (!bucketMap[c.bucket_id]) bucketMap[c.bucket_id] = [];
+          bucketMap[c.bucket_id].push(c);
+        } else {
+          noBucket.push(c);
+        }
+      });
+
+      job.buckets.forEach(function(bucket) {
+        var cabs = bucketMap[bucket.id] || [];
+        var bucketDone = cabs.filter(function(c) { return c.status === TERMINAL; }).length;
+
+        tbody += '<tr class="bucket-row" data-bucket="' + bucket.id + '"><td>' + bucket.name +
+          ' (' + bucketDone + '/' + cabs.length + ')</td>';
+        STATIONS.forEach(function(st) {
+          if (st.level === 'l2' || st.level === 'l1') {
+            var key = (st.level === 'l2' ? 'l2:' + bucket.id : 'l1:' + job.id) + ':' + st.slug;
+            var cur = st.level === 'l2' ? currentStation('l2', bucket.id) : -1;
+            var cls = scanned[key] ? (st.seq === cur && st.level === 'l2' ? 'dot-current' : 'dot-scanned') : 'dot-none';
+            tbody += '<td><span class="dot ' + cls + '"></span></td>';
+          } else {
+            var count = 0;
+            cabs.forEach(function(c) { if (scanned['l3:' + c.id + ':' + st.slug]) count++; });
+            if (count === 0) tbody += '<td><span class="dot dot-none"></span></td>';
+            else if (count === cabs.length) tbody += '<td><span class="dot dot-scanned"></span></td>';
+            else tbody += '<td style="font-size:0.65rem;color:var(--muted)">' + count + '/' + cabs.length + '</td>';
+          }
+        });
+        tbody += '</tr>';
+
+        cabs.forEach(function(cab) {
+          var curSeq = currentStation('l3', cab.id);
+          tbody += '<tr class="cab-row hidden" data-parent="' + bucket.id + '"><td>${L3} ' + cab.cabinet_number + (cab.label ? ' — ' + cab.label : '') + '</td>';
+          STATIONS.forEach(function(st) {
+            var key = st.level === 'l3' ? 'l3:' + cab.id + ':' + st.slug :
+                      st.level === 'l2' ? 'l2:' + (cab.bucket_id || 0) + ':' + st.slug :
+                      'l1:' + job.id + ':' + st.slug;
+            var isCurrent = st.level === 'l3' && st.seq === curSeq;
+            var cls = scanned[key] ? (isCurrent ? 'dot-current' : 'dot-scanned') : 'dot-none';
+            tbody += '<td><span class="dot ' + cls + '"></span></td>';
+          });
+          tbody += '</tr>';
+        });
+      });
+
+      noBucket.forEach(function(cab) {
+        var curSeq = currentStation('l3', cab.id);
+        tbody += '<tr class="cab-row"><td>${L3} ' + cab.cabinet_number + (cab.label ? ' — ' + cab.label : '') + '</td>';
+        STATIONS.forEach(function(st) {
+          var key = st.level === 'l3' ? 'l3:' + cab.id + ':' + st.slug : 'l1:' + job.id + ':' + st.slug;
+          var isCurrent = st.level === 'l3' && st.seq === curSeq;
+          var cls = scanned[key] ? (isCurrent ? 'dot-current' : 'dot-scanned') : 'dot-none';
+          tbody += '<td><span class="dot ' + cls + '"></span></td>';
+        });
+        tbody += '</tr>';
+      });
+
+      table.innerHTML = thead + tbody;
+
+      table.querySelectorAll('.bucket-row').forEach(function(row) {
+        row.addEventListener('click', function() {
+          var bucketId = row.dataset.bucket;
+          var expanded = row.classList.toggle('expanded');
+          table.querySelectorAll('.cab-row[data-parent="' + bucketId + '"]').forEach(function(r) {
+            r.classList.toggle('hidden', !expanded);
+          });
+        });
+      });
+    });
+  `);
 }
