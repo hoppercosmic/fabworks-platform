@@ -100,7 +100,8 @@ const SHARED_STYLES = `
     .pill-purple { background: rgba(168,85,247,0.15); color: var(--purple); }
 `;
 
-function page(title: string, extraStyles: string, nav: string, body: string, script: string): string {
+function page(title: string, extraStyles: string, nav: string, body: string, script: string, cdnScripts: string[] = []): string {
+  const cdnTags = cdnScripts.map((src) => `<script src="${src}"></script>`).join("\n  ");
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -115,6 +116,7 @@ function page(title: string, extraStyles: string, nav: string, body: string, scr
     <nav>${nav}</nav>
   </header>
   ${body}
+  ${cdnTags}
   <script>${script}</script>
 </body>
 </html>`;
@@ -183,6 +185,25 @@ export function scanPage(config: TenantConfig): string {
     .remember-label { font-size: 0.75rem; color: var(--muted); display: flex; align-items: center; gap: 4px; white-space: nowrap; }
     .section-label { font-size: 0.75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
     #context-panel { display: none; }
+    .job-input-row { display: flex; gap: 8px; align-items: center; }
+    .job-input-row input { flex: 1; }
+    .cam-btn {
+      width: 48px; height: 48px; flex-shrink: 0; border: 1px solid var(--border);
+      border-radius: 8px; background: var(--bg); color: var(--accent); cursor: pointer;
+      display: flex; align-items: center; justify-content: center; font-size: 1.3rem;
+    }
+    .cam-btn:active { transform: scale(0.95); }
+    .scanner-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 200;
+      display: none; flex-direction: column; align-items: center; justify-content: center;
+    }
+    .scanner-overlay.active { display: flex; }
+    .scanner-close {
+      position: absolute; top: 16px; right: 16px; background: none; border: none;
+      color: white; font-size: 2rem; cursor: pointer; z-index: 201;
+    }
+    #qr-reader { width: 100%; max-width: 400px; }
+    .scanner-status { color: var(--muted); font-size: 0.85rem; margin-top: 12px; }
     .swipe-toast {
       position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
       background: var(--surface); border: 1px solid var(--accent); border-radius: 12px;
@@ -198,8 +219,16 @@ export function scanPage(config: TenantConfig): string {
     </div>
     <div class="card">
       <label>${config.entity_labels.l1}</label>
-      <input type="text" id="job-input" placeholder="${config.entity_labels.l1} number" inputmode="numeric" autocomplete="off">
+      <div class="job-input-row">
+        <input type="text" id="job-input" placeholder="${config.entity_labels.l1} number" inputmode="numeric" autocomplete="off">
+        <button class="cam-btn" id="cam-btn" title="Scan QR code">&#x1F4F7;</button>
+      </div>
       <div id="job-info" style="margin-top:8px;font-size:0.85rem;color:var(--muted)"></div>
+    </div>
+    <div class="scanner-overlay" id="scanner-overlay">
+      <button class="scanner-close" id="scanner-close">&times;</button>
+      <div id="qr-reader"></div>
+      <div class="scanner-status" id="scanner-status">Point camera at a FabWorks QR code</div>
     </div>
     <div class="card" id="context-panel">
       <div id="context-label" class="section-label"></div>
@@ -391,6 +420,109 @@ export function scanPage(config: TenantConfig): string {
       });
     });
 
+    // --- QR Scanner ---
+    var scannerOverlay = document.getElementById('scanner-overlay');
+    var scannerStatus = document.getElementById('scanner-status');
+    var qrScanner = null;
+    var scannerActive = false;
+
+    document.getElementById('cam-btn').addEventListener('click', function() {
+      if (typeof Html5Qrcode === 'undefined') {
+        scannerStatus.textContent = 'Scanner library not loaded';
+        return;
+      }
+      scannerOverlay.classList.add('active');
+      scannerStatus.textContent = 'Starting camera...';
+
+      if (!qrScanner) qrScanner = new Html5Qrcode('qr-reader');
+
+      qrScanner.start(
+        { facingMode: 'environment' },
+        { fps: 10, qrbox: { width: 250, height: 250 } },
+        function(decoded) { handleQR(decoded); },
+        function() {}
+      ).then(function() {
+        scannerActive = true;
+        scannerStatus.textContent = 'Point camera at a FabWorks QR code';
+      }).catch(function(err) {
+        scannerStatus.textContent = 'Camera error: ' + err;
+      });
+    });
+
+    function stopScanner() {
+      if (qrScanner && scannerActive) {
+        qrScanner.stop().then(function() { scannerActive = false; });
+      }
+      scannerOverlay.classList.remove('active');
+    }
+
+    document.getElementById('scanner-close').addEventListener('click', stopScanner);
+
+    function handleQR(text) {
+      stopScanner();
+      var parts = text.split(':');
+      if (parts[0] !== 'fw' || parts.length < 3) {
+        scannerStatus.textContent = 'Not a FabWorks code';
+        return;
+      }
+      var type = parts[1];
+      var id = parseInt(parts[2]);
+
+      if (type === 'l1' || type === 'job') {
+        fetch('/api/jobs/' + id).then(function(r) { return r.json(); }).then(function(detail) {
+          if (detail.error) return;
+          jobData = detail;
+          jobInput.value = detail.job_number;
+          jobInfo.innerHTML = '<strong>' + detail.job_name + '</strong> — ' +
+            detail.buckets.length + ' ' + LABELS.l2.toLowerCase() + 's, ' + detail.cabinets.length + ' ' + LABELS.l3.toLowerCase() + 's';
+          loadJobContext();
+          updateScanBtn();
+        });
+      } else if (type === 'l2' || type === 'bucket') {
+        fetch('/api/jobs?status=active').then(function(r) { return r.json(); }).then(function(jobs) {
+          var found = null;
+          var promises = jobs.map(function(j) {
+            return fetch('/api/jobs/' + j.id).then(function(r) { return r.json(); }).then(function(detail) {
+              var bucket = detail.buckets.find(function(b) { return b.id === id; });
+              if (bucket) found = detail;
+            });
+          });
+          Promise.all(promises).then(function() {
+            if (found) {
+              jobData = found;
+              jobInput.value = found.job_number;
+              jobInfo.innerHTML = '<strong>' + found.job_name + '</strong> — ' +
+                found.buckets.length + ' ' + LABELS.l2.toLowerCase() + 's, ' + found.cabinets.length + ' ' + LABELS.l3.toLowerCase() + 's';
+              selectedEntityId = id;
+              loadJobContext();
+              updateScanBtn();
+            }
+          });
+        });
+      } else if (type === 'l3' || type === 'cabinet') {
+        fetch('/api/jobs?status=active').then(function(r) { return r.json(); }).then(function(jobs) {
+          var found = null;
+          var promises = jobs.map(function(j) {
+            return fetch('/api/jobs/' + j.id).then(function(r) { return r.json(); }).then(function(detail) {
+              var cab = detail.cabinets.find(function(c) { return c.id === id; });
+              if (cab) found = detail;
+            });
+          });
+          Promise.all(promises).then(function() {
+            if (found) {
+              jobData = found;
+              jobInput.value = found.job_number;
+              jobInfo.innerHTML = '<strong>' + found.job_name + '</strong> — ' +
+                found.buckets.length + ' ' + LABELS.l2.toLowerCase() + 's, ' + found.cabinets.length + ' ' + LABELS.l3.toLowerCase() + 's';
+              selectedEntityId = id;
+              loadJobContext();
+              updateScanBtn();
+            }
+          });
+        });
+      }
+    }
+
     // --- Swipe gestures ---
     var swipeToast = document.getElementById('swipe-toast');
     var toastTimer = null;
@@ -461,7 +593,7 @@ export function scanPage(config: TenantConfig): string {
         }
       }
     }, { passive: true });
-`);
+`, ["https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"]);
 }
 
 // ─── NEW JOB PAGE ────────────────────────────────────────
@@ -591,6 +723,22 @@ export function jobDetailPage(config: TenantConfig): string {
     .cab-tile.assembled { border-color: var(--success); color: var(--success); }
     .cab-tile.staged { border-color: var(--purple); color: var(--purple); }
     .cab-tile .sub { font-weight: 400; font-size: 0.65rem; color: var(--muted); }
+    .label-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-top: 12px; }
+    .qr-label {
+      background: white; color: #111; border-radius: 8px; padding: 12px;
+      text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px;
+    }
+    .qr-label canvas { max-width: 120px; }
+    .qr-label .qr-title { font-weight: 700; font-size: 0.85rem; }
+    .qr-label .qr-sub { font-size: 0.7rem; color: #666; }
+    #labels-panel { display: none; }
+    @media print {
+      header, .card, .scan-log, #scan-log, .add-form, .section-title button, .btn-sm { display: none !important; }
+      #labels-panel { display: block !important; }
+      .label-grid { grid-template-columns: repeat(3, 1fr); }
+      .qr-label { border: 1px solid #ccc; break-inside: avoid; }
+      main { padding: 0 !important; max-width: none !important; }
+    }
 `, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_DASH}`, `
   <main>
     <div id="loading" style="color:var(--muted);text-align:center;padding:48px">Loading...</div>
@@ -598,6 +746,12 @@ export function jobDetailPage(config: TenantConfig): string {
       <div class="card">
         <div class="job-title" id="job-title"></div>
         <div class="job-meta" id="job-meta"></div>
+        <div style="margin-top:8px">
+          <button class="btn btn-sm" id="print-labels-btn" style="background:var(--accent);color:white">Print QR Labels</button>
+        </div>
+      </div>
+      <div id="labels-panel">
+        <div class="label-grid" id="label-grid"></div>
       </div>
       <div class="card">
         <div class="section-title">${L2}s</div>
@@ -730,7 +884,48 @@ export function jobDetailPage(config: TenantConfig): string {
     });
 
     load();
-`);
+
+    // --- QR Label Generation ---
+    document.getElementById('print-labels-btn').addEventListener('click', function() {
+      if (!job || typeof QRCode === 'undefined') return;
+      var grid = document.getElementById('label-grid');
+      var panel = document.getElementById('labels-panel');
+      grid.innerHTML = '';
+      panel.style.display = 'block';
+
+      function makeLabel(text, title, subtitle) {
+        var div = document.createElement('div');
+        div.className = 'qr-label';
+        var canvas = document.createElement('canvas');
+        QRCode.toCanvas(canvas, text, { width: 120, margin: 1 });
+        div.appendChild(canvas);
+        var t = document.createElement('div');
+        t.className = 'qr-title';
+        t.textContent = title;
+        div.appendChild(t);
+        if (subtitle) {
+          var s = document.createElement('div');
+          s.className = 'qr-sub';
+          s.textContent = subtitle;
+          div.appendChild(s);
+        }
+        grid.appendChild(div);
+      }
+
+      makeLabel('fw:l1:' + job.id + ':' + job.job_number, job.job_number + ' ' + job.job_name, LABELS.l1);
+
+      job.buckets.forEach(function(b) {
+        makeLabel('fw:l2:' + b.id + ':' + b.name, b.name, LABELS.l2 + ' — ' + job.job_number);
+      });
+
+      job.cabinets.forEach(function(c) {
+        var label = c.label || (LABELS.l3 + ' ' + c.cabinet_number);
+        makeLabel('fw:l3:' + c.id + ':' + label, label, LABELS.l3 + ' #' + c.cabinet_number + ' — ' + job.job_number);
+      });
+
+      setTimeout(function() { window.print(); }, 300);
+    });
+`, ["https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"]);
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────
