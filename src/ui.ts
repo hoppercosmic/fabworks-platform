@@ -127,6 +127,7 @@ const NAV_NEW = '<a href="/jobs/new">+ Job</a>';
 const NAV_DASH = '<a href="/dashboard">Dashboard</a>';
 const NAV_STATIONS = '<a href="/stations">Stations</a>';
 const NAV_KPI = '<a href="/kpi">KPI</a>';
+const NAV_TAKT = '<a href="/takt">Takt</a>';
 
 function stationNamesJS(config: TenantConfig): string {
   const map: Record<string, string> = {};
@@ -291,7 +292,7 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
     .user-dropdown.open { display: block; }
     .user-dropdown a { display: block; padding: 10px 14px; color: var(--text); text-decoration: none; font-size: 0.8rem; }
     .user-dropdown a:hover { background: var(--bg); }
-`, `${NAV_NEW}${NAV_STATIONS}${NAV_DASH}${NAV_KPI}<div class="user-menu"><button class="user-btn" id="user-btn">${user.name}</button><div class="user-dropdown" id="user-dropdown"><a href="#" id="logout-link">Log out</a></div></div>`, `
+`, `${NAV_NEW}${NAV_STATIONS}${NAV_DASH}${NAV_KPI}${NAV_TAKT}<div class="user-menu"><button class="user-btn" id="user-btn">${user.name}</button><div class="user-dropdown" id="user-dropdown"><a href="#" id="logout-link">Log out</a></div></div>`, `
   <main>
     <div class="card">
       <div class="station-carousel" id="station-carousel">
@@ -704,7 +705,7 @@ export function newJobPage(config: TenantConfig): string {
     .recent-job:last-child { border-bottom: none; }
     .recent-job .num { font-weight: 600; }
     .recent-job a { color: var(--accent); text-decoration: none; font-size: 0.8rem; }
-`, `${NAV_SCAN}${NAV_STATIONS}${NAV_DASH}${NAV_KPI}`, `
+`, `${NAV_SCAN}${NAV_STATIONS}${NAV_DASH}${NAV_KPI}${NAV_TAKT}`, `
   <main>
     <div class="card">
       <label>${L1} Number</label>
@@ -834,7 +835,7 @@ export function jobDetailPage(config: TenantConfig): string {
       .qr-label { border: 1px solid #ccc; break-inside: avoid; }
       main { padding: 0 !important; max-width: none !important; }
     }
-`, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_DASH}${NAV_KPI}`, `
+`, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_DASH}${NAV_KPI}${NAV_TAKT}`, `
   <main>
     <div id="loading" style="color:var(--muted);text-align:center;padding:48px">Loading...</div>
     <div id="content" style="display:none">
@@ -1062,7 +1063,7 @@ export function dashboardPage(config: TenantConfig): string {
     .feed-meta { color: var(--muted); font-size: 0.7rem; margin-top: 2px; }
     .empty { text-align: center; padding: 48px 16px; color: var(--muted); }
     .empty a { color: var(--accent); text-decoration: none; }
-`, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_KPI}`, `
+`, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_KPI}${NAV_TAKT}`, `
   <main>
     <div class="top-bar">
       <span id="updated"></span>
@@ -1213,7 +1214,7 @@ export function stationViewPage(config: TenantConfig): string {
       opacity: 0; transition: opacity 0.2s; pointer-events: none; z-index: 100;
     }
     .swipe-toast.show { opacity: 1; }
-`, `${NAV_SCAN}${NAV_NEW}${NAV_DASH}${NAV_KPI}`, `
+`, `${NAV_SCAN}${NAV_NEW}${NAV_DASH}${NAV_KPI}${NAV_TAKT}`, `
   <main>
     <div class="card">
       <div class="station-carousel" id="station-carousel">
@@ -1408,7 +1409,7 @@ export function progressPage(config: TenantConfig): string {
     .dot-current { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
     .summary { font-size: 0.8rem; color: var(--muted); }
     .summary .done { color: var(--success); font-weight: 600; }
-  `, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_DASH}${NAV_KPI}`, `
+  `, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_DASH}${NAV_KPI}${NAV_TAKT}`, `
   <main>
     <div id="loading" style="color:var(--muted);text-align:center;padding:48px">Loading...</div>
     <div id="content" style="display:none">
@@ -1585,7 +1586,7 @@ export function kpiPage(config: TenantConfig): string {
     .summary-stat .lbl { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; }
     .empty-state { text-align: center; padding: 48px 16px; color: var(--muted); }
     .station-info { font-size: 0.75rem; color: var(--muted); }
-  `, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_DASH}`, `
+  `, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_DASH}${NAV_TAKT}`, `
   <main>
     <div class="controls">
       <span class="label">Time Range</span>
@@ -1686,6 +1687,173 @@ export function kpiPage(config: TenantConfig): string {
               (barsHtml ? '<div>' + barsHtml + '</div>' : '') +
             '</div>';
           }).join('');
+        });
+    }
+
+    daysSelect.addEventListener('change', load);
+    load();
+  `);
+}
+
+// ─── TAKT TIME / DWELL TIME ──────────────────────────────
+export function taktPage(config: TenantConfig): string {
+  return page("Takt Time", `
+    main { flex: 1; padding: 16px; max-width: 900px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+    .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .controls select { width: auto; padding: 8px 12px; font-size: 0.85rem; }
+    .controls .label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .takt-chart { display: flex; flex-direction: column; gap: 6px; }
+    .takt-row { display: flex; align-items: center; gap: 8px; }
+    .takt-label {
+      width: 130px; flex-shrink: 0; text-align: right; font-size: 0.8rem; font-weight: 600;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .takt-bar-wrap { flex: 1; display: flex; align-items: center; gap: 8px; }
+    .takt-bar-track { flex: 1; height: 28px; background: var(--bg); border-radius: 6px; overflow: hidden; position: relative; }
+    .takt-bar-fill { height: 100%; border-radius: 6px; transition: width 0.4s; min-width: 2px; }
+    .takt-bar-p90 {
+      position: absolute; top: 0; height: 100%; width: 2px; background: var(--warning);
+      opacity: 0.8;
+    }
+    .takt-val { width: 60px; font-size: 0.8rem; font-weight: 600; flex-shrink: 0; }
+    .takt-meta { font-size: 0.65rem; color: var(--muted); }
+    .level-tag {
+      display: inline-block; font-size: 0.55rem; font-weight: 700; text-transform: uppercase;
+      padding: 1px 5px; border-radius: 3px; margin-left: 4px; vertical-align: middle;
+    }
+    .level-l1 { background: rgba(59,130,246,0.15); color: var(--accent); }
+    .level-l2 { background: rgba(34,197,94,0.15); color: var(--success); }
+    .level-l3 { background: rgba(168,85,247,0.15); color: var(--purple); }
+    .fill-l1 { background: var(--accent); }
+    .fill-l2 { background: var(--success); }
+    .fill-l3 { background: var(--purple); }
+    .legend { display: flex; gap: 16px; font-size: 0.7rem; color: var(--muted); flex-wrap: wrap; align-items: center; }
+    .legend-dot { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 4px; vertical-align: middle; }
+    .legend .p90-mark { display: inline-block; width: 10px; height: 10px; border-left: 2px solid var(--warning); margin-right: 4px; }
+    .outlier-list { display: flex; flex-direction: column; gap: 6px; }
+    .outlier-item {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 14px; background: var(--surface); border: 1px solid var(--border);
+      border-radius: 8px; font-size: 0.8rem;
+    }
+    .outlier-item .station { font-weight: 700; color: var(--warning); }
+    .outlier-item .entity { color: var(--text); }
+    .outlier-item .job { color: var(--muted); font-size: 0.7rem; }
+    .outlier-item .time { font-weight: 700; font-size: 0.9rem; }
+    .section-title { font-size: 0.85rem; font-weight: 700; color: var(--text); }
+    .empty-state { text-align: center; padding: 48px 16px; color: var(--muted); }
+    .bottleneck-badge {
+      display: inline-block; font-size: 0.6rem; font-weight: 700; text-transform: uppercase;
+      background: rgba(239,68,68,0.15); color: var(--error); padding: 2px 6px; border-radius: 4px;
+      margin-left: 6px;
+    }
+  `, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_DASH}${NAV_KPI}`, `
+  <main>
+    <div class="controls">
+      <span class="label">Time Range</span>
+      <select id="days-select">
+        <option value="7">Last 7 days</option>
+        <option value="14">Last 14 days</option>
+        <option value="30" selected>Last 30 days</option>
+        <option value="90">Last 90 days</option>
+      </select>
+    </div>
+    <div class="card">
+      <div class="section-title">Station Dwell Times</div>
+      <div class="legend" style="margin:8px 0">
+        <span><span class="legend-dot" style="background:var(--accent)"></span>${config.entity_labels.l1}</span>
+        <span><span class="legend-dot" style="background:var(--success)"></span>${config.entity_labels.l2}</span>
+        <span><span class="legend-dot" style="background:var(--purple)"></span>${config.entity_labels.l3}</span>
+        <span><span class="p90-mark"></span>P90</span>
+      </div>
+      <div class="takt-chart" id="takt-chart"></div>
+    </div>
+    <div class="card" id="outlier-card" style="display:none">
+      <div class="section-title">Outliers <span style="font-weight:400;font-size:0.7rem;color:var(--muted)">&gt; 2x avg &amp; &gt; 30min</span></div>
+      <div class="outlier-list" id="outlier-list"></div>
+    </div>
+    <div id="empty" class="empty-state" style="display:none">No transition data in this time range</div>
+  </main>
+  `, `
+    var LABELS = ${JSON.stringify(config.entity_labels)};
+    var daysSelect = document.getElementById('days-select');
+    var chartDiv = document.getElementById('takt-chart');
+    var outlierCard = document.getElementById('outlier-card');
+    var outlierList = document.getElementById('outlier-list');
+    var emptyDiv = document.getElementById('empty');
+
+    function fmtMin(m) {
+      if (m == null || m === 0) return '—';
+      if (m < 60) return Math.round(m) + 'm';
+      var h = Math.floor(m / 60);
+      var rm = Math.round(m % 60);
+      return h + 'h ' + rm + 'm';
+    }
+
+    function load() {
+      var days = daysSelect.value;
+      fetch('/api/kpi/takt?days=' + days)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          var stations = data.stations || [];
+          var outliers = data.outliers || [];
+          var names = data.station_names || {};
+
+          if (stations.length === 0) {
+            chartDiv.innerHTML = '';
+            outlierCard.style.display = 'none';
+            emptyDiv.style.display = 'block';
+            return;
+          }
+          emptyDiv.style.display = 'none';
+
+          var maxAvg = Math.max.apply(null, stations.map(function(s) { return s.avg_minutes; }));
+          var maxP90 = Math.max.apply(null, stations.map(function(s) { return s.p90_minutes; }));
+          var maxBar = Math.max(maxAvg, maxP90) || 1;
+          var bottleneckStation = stations.reduce(function(a, b) { return a.avg_minutes > b.avg_minutes ? a : b; });
+
+          chartDiv.innerHTML = stations.map(function(s) {
+            var avgPct = Math.round((s.avg_minutes / maxBar) * 100);
+            var p90Pct = Math.round((s.p90_minutes / maxBar) * 100);
+            var isBottleneck = s.station === bottleneckStation.station && stations.length > 1;
+            var levelClass = 'fill-' + s.level;
+            var fromName = names[s.station] || s.station;
+            var toName = names[s.next_station] || s.next_station;
+
+            return '<div class="takt-row">' +
+              '<div class="takt-label">' + fromName +
+                '<span class="level-tag level-' + s.level + '">' + s.level + '</span>' +
+                (isBottleneck ? '<span class="bottleneck-badge">Bottleneck</span>' : '') +
+              '</div>' +
+              '<div class="takt-bar-wrap">' +
+                '<div class="takt-bar-track">' +
+                  '<div class="takt-bar-fill ' + levelClass + '" style="width:' + avgPct + '%"></div>' +
+                  '<div class="takt-bar-p90" style="left:' + p90Pct + '%"></div>' +
+                '</div>' +
+                '<div class="takt-val">' + fmtMin(s.avg_minutes) + '</div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="takt-row" style="margin-bottom:4px">' +
+              '<div class="takt-label"></div>' +
+              '<div class="takt-meta">' + s.count + ' transitions — min ' + fmtMin(s.min_minutes) + ' / p90 ' + fmtMin(s.p90_minutes) + ' / max ' + fmtMin(s.max_minutes) + ' — to ' + toName + '</div>' +
+            '</div>';
+          }).join('');
+
+          if (outliers.length > 0) {
+            outlierCard.style.display = 'block';
+            outlierList.innerHTML = outliers.map(function(o) {
+              var fromName = names[o.station] || o.station;
+              var toName = names[o.next_station] || o.next_station;
+              return '<div class="outlier-item">' +
+                '<div><span class="station">' + fromName + ' → ' + toName + '</span>' +
+                  '<div><span class="entity">' + o.entity_label + '</span> <span class="job">' + o.job_number + '</span></div>' +
+                '</div>' +
+                '<div class="time">' + fmtMin(o.dwell_minutes) + '</div>' +
+              '</div>';
+            }).join('');
+          } else {
+            outlierCard.style.display = 'none';
+          }
         });
     }
 

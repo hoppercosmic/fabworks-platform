@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage } from "./ui";
+import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage } from "./ui";
 
 // --- Types ---
 
@@ -657,6 +657,140 @@ app.get("/api/kpi/assemblers", requireAuth("lead"), async (c) => {
   });
 });
 
+// --- Takt / Dwell Time ---
+
+app.get("/api/kpi/takt", requireAuth("lead"), async (c) => {
+  const config = c.get("config");
+  const days = parseInt(c.req.query("days") || "30");
+
+  type DwellRow = {
+    station: string;
+    next_station: string;
+    level: string;
+    entity_id: number;
+    entity_label: string;
+    job_number: string;
+    scanned_at: string;
+    next_scanned_at: string;
+    dwell_minutes: number;
+  };
+
+  const results: DwellRow[] = [];
+
+  for (const station of config.stations) {
+    const sameLevel = config.stations.filter((s) => s.level === station.level && s.seq > station.seq);
+    if (sameLevel.length === 0) continue;
+    const nextStation = sameLevel[0];
+
+    let entityCol: string;
+    let entityJoin: string;
+    let entityLabel: string;
+    if (station.level === "l1") {
+      entityCol = "job_id";
+      entityJoin = "JOIN jobs j ON s1.job_id = j.id";
+      entityLabel = "j.job_number || ' ' || j.job_name";
+    } else if (station.level === "l2") {
+      entityCol = "bucket_id";
+      entityJoin = "JOIN buckets b ON s1.bucket_id = b.id JOIN jobs j ON b.job_id = j.id";
+      entityLabel = "b.name";
+    } else {
+      entityCol = "cabinet_id";
+      entityJoin = "JOIN cabinets cab ON s1.cabinet_id = cab.id JOIN jobs j ON cab.job_id = j.id";
+      entityLabel = "'" + config.entity_labels.l3 + " ' || cab.cabinet_number";
+    }
+
+    const rows = await c.env.DB.prepare(
+      `SELECT
+         s1.station,
+         ? as next_station,
+         ? as level,
+         s1.${entityCol} as entity_id,
+         ${entityLabel} as entity_label,
+         j.job_number,
+         s1.scanned_at,
+         s2.scanned_at as next_scanned_at,
+         ROUND((julianday(s2.scanned_at) - julianday(s1.scanned_at)) * 1440, 1) as dwell_minutes
+       FROM scans s1
+       ${entityJoin}
+       JOIN scans s2
+         ON s2.${entityCol} = s1.${entityCol}
+         AND s2.station = ?
+         AND s2.scanned_at > s1.scanned_at
+       WHERE s1.station = ?
+         AND s1.${entityCol} IS NOT NULL
+         AND s1.scanned_at >= datetime('now', '-' || ? || ' days')
+       ORDER BY dwell_minutes DESC
+       LIMIT 200`
+    ).bind(nextStation.slug, station.level, nextStation.slug, station.slug, days).all();
+
+    results.push(...(rows.results as DwellRow[]));
+  }
+
+  const stationStats: Record<string, {
+    station: string;
+    next_station: string;
+    level: string;
+    count: number;
+    avg_minutes: number;
+    min_minutes: number;
+    max_minutes: number;
+    p90_minutes: number;
+  }> = {};
+
+  for (const row of results) {
+    if (!stationStats[row.station]) {
+      stationStats[row.station] = {
+        station: row.station,
+        next_station: row.next_station,
+        level: row.level,
+        count: 0,
+        avg_minutes: 0,
+        min_minutes: Infinity,
+        max_minutes: 0,
+        p90_minutes: 0,
+      };
+    }
+    const s = stationStats[row.station];
+    s.count++;
+    s.avg_minutes += row.dwell_minutes;
+    if (row.dwell_minutes < s.min_minutes) s.min_minutes = row.dwell_minutes;
+    if (row.dwell_minutes > s.max_minutes) s.max_minutes = row.dwell_minutes;
+  }
+
+  const stationDwells: Record<string, number[]> = {};
+  for (const row of results) {
+    if (!stationDwells[row.station]) stationDwells[row.station] = [];
+    stationDwells[row.station].push(row.dwell_minutes);
+  }
+
+  const stations = Object.values(stationStats).map((s) => {
+    s.avg_minutes = Math.round((s.avg_minutes / s.count) * 10) / 10;
+    if (s.min_minutes === Infinity) s.min_minutes = 0;
+    const sorted = (stationDwells[s.station] || []).sort((a, b) => a - b);
+    s.p90_minutes = sorted.length > 0 ? sorted[Math.floor(sorted.length * 0.9)] : 0;
+    return s;
+  });
+
+  const configStations = config.stations;
+  stations.sort((a, b) => {
+    const seqA = configStations.find((s) => s.slug === a.station)?.seq ?? 0;
+    const seqB = configStations.find((s) => s.slug === b.station)?.seq ?? 0;
+    return seqA - seqB;
+  });
+
+  const outliers = results
+    .filter((r) => {
+      const stat = stationStats[r.station];
+      return stat && r.dwell_minutes > stat.avg_minutes * 2 && r.dwell_minutes > 30;
+    })
+    .slice(0, 20);
+
+  const stationNames: Record<string, string> = {};
+  config.stations.forEach((s) => { stationNames[s.slug] = s.name; });
+
+  return c.json({ stations, outliers, station_names: stationNames, days });
+});
+
 // --- Station view ---
 
 app.get("/api/stations/:slug/items", async (c) => {
@@ -741,5 +875,6 @@ app.get("/job/:id", requireAuth(), (c) => c.html(jobDetailPage(c.get("config")))
 app.get("/stations", requireAuth(), (c) => c.html(stationViewPage(c.get("config"))));
 app.get("/job/:id/progress", requireAuth(), (c) => c.html(progressPage(c.get("config"))));
 app.get("/kpi", requireAuth("lead"), (c) => c.html(kpiPage(c.get("config"))));
+app.get("/takt", requireAuth("lead"), (c) => c.html(taktPage(c.get("config"))));
 
 export default app;
