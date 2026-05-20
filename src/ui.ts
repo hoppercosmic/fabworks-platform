@@ -1,5 +1,40 @@
-import type { TenantConfig, SessionUser } from "./index";
+import type { TenantConfig, SessionUser, UserRole } from "./index";
 
+// ─── Inline SVG Icons (24x24, outlined) ──────────────────
+const IC = (d: string) => `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
+const SVG_SCAN = IC('<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><circle cx="12" cy="12" r="3"/>');
+const SVG_PLUS = IC('<circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/>');
+const SVG_CHART = IC('<rect x="3" y="12" width="4" height="9" rx="1"/><rect x="10" y="7" width="4" height="14" rx="1"/><rect x="17" y="3" width="4" height="18" rx="1"/>');
+const SVG_GRID = IC('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>');
+const SVG_TREND = IC('<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>');
+const SVG_CLOCK = IC('<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16.5 14.5"/>');
+const SVG_GEAR = IC('<circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>');
+
+// ─── Nav Items ───────────────────────────────────────────
+const ROLE_LEVELS: Record<UserRole, number> = { user: 0, lead: 1, supervisor: 2, admin: 3 };
+
+type NavItem = { path: string; label: string; icon: string; minRole: UserRole };
+const NAV_ITEMS: NavItem[] = [
+  { path: "/",           label: "Scan",      icon: SVG_SCAN,  minRole: "user" },
+  { path: "/jobs/new",   label: "New Job",   icon: SVG_PLUS,  minRole: "user" },
+  { path: "/dashboard",  label: "Dash",      icon: SVG_CHART, minRole: "user" },
+  { path: "/stations",   label: "Stations",  icon: SVG_GRID,  minRole: "user" },
+  { path: "/kpi",        label: "KPI",       icon: SVG_TREND, minRole: "lead" },
+  { path: "/takt",       label: "Takt",      icon: SVG_CLOCK, minRole: "lead" },
+  { path: "/admin",      label: "Admin",     icon: SVG_GEAR,  minRole: "admin" },
+];
+
+function renderNav(currentPath: string, user: SessionUser): string {
+  const userLevel = ROLE_LEVELS[user.role];
+  return NAV_ITEMS
+    .filter((item) => userLevel >= ROLE_LEVELS[item.minRole])
+    .map((item) => {
+      const active = item.path === currentPath;
+      return `<a href="${item.path}" class="nav-item${active ? " active" : ""}"><span class="nav-icon">${item.icon}</span><span class="nav-label">${item.label}</span></a>`;
+    }).join("");
+}
+
+// ─── Shared Styles ───────────────────────────────────────
 const SHARED_STYLES = `
     * { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -13,6 +48,7 @@ const SHARED_STYLES = `
       --error: #ef4444;
       --warning: #f59e0b;
       --purple: #a855f7;
+      --nav-h: 62px;
     }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
@@ -21,19 +57,58 @@ const SHARED_STYLES = `
       min-height: 100dvh;
       display: flex;
       flex-direction: column;
+      padding-top: calc(var(--nav-h) + 44px);
     }
-    header {
+    .top-nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
       background: var(--surface);
       border-bottom: 1px solid var(--border);
-      padding: 12px 16px;
       display: flex;
-      align-items: center;
-      justify-content: space-between;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      scrollbar-width: none;
+      padding: 0 4px;
+      padding-top: env(safe-area-inset-top);
+      height: var(--nav-h);
     }
-    header h1 { font-size: 1.25rem; font-weight: 700; }
-    header nav { display: flex; gap: 16px; }
-    header a { color: var(--muted); text-decoration: none; font-size: 0.875rem; }
-    header a:hover { color: var(--text); }
+    .top-nav::-webkit-scrollbar { display: none; }
+    .nav-item {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      min-width: 64px; padding: 6px 12px 4px;
+      color: var(--muted); text-decoration: none; flex-shrink: 0;
+      -webkit-tap-highlight-color: transparent; transition: color 0.15s;
+    }
+    .nav-item.active { color: var(--accent); }
+    .nav-icon { width: 24px; height: 24px; }
+    .nav-icon svg { width: 24px; height: 24px; }
+    .nav-label { font-size: 0.6rem; font-weight: 600; margin-top: 2px; letter-spacing: 0.02em; }
+    .page-header {
+      position: fixed; top: var(--nav-h); left: 0; right: 0; z-index: 99;
+      background: var(--bg);
+      border-bottom: 1px solid var(--border);
+      padding: 8px 16px;
+      display: flex; align-items: center; justify-content: space-between;
+      height: 44px;
+    }
+    .page-header h1 { font-size: 1.1rem; font-weight: 700; }
+    .user-avatar {
+      width: 36px; height: 36px; border-radius: 50%;
+      background: var(--accent); color: white;
+      font-weight: 700; font-size: 0.9rem; border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .user-menu { position: relative; }
+    .user-dropdown {
+      display: none; position: absolute; right: 0; top: 100%; margin-top: 4px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      min-width: 160px; z-index: 150; overflow: hidden;
+    }
+    .user-dropdown.open { display: block; }
+    .user-dropdown .ud-info { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+    .user-dropdown .ud-name { font-weight: 700; font-size: 0.9rem; }
+    .user-dropdown .ud-role { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .user-dropdown a { display: block; padding: 12px 14px; color: var(--text); text-decoration: none; font-size: 0.85rem; }
+    .user-dropdown a:hover { background: var(--bg); }
     .card {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -100,35 +175,51 @@ const SHARED_STYLES = `
     .pill-purple { background: rgba(168,85,247,0.15); color: var(--purple); }
 `;
 
-function page(title: string, extraStyles: string, nav: string, body: string, script: string, cdnScripts: string[] = []): string {
+// ─── Page Layout ─────────────────────────────────────────
+const USER_MENU_JS = `
+    var _avatarBtn = document.getElementById('user-avatar-btn');
+    var _userDrop = document.getElementById('user-dropdown');
+    if (_avatarBtn) {
+      _avatarBtn.addEventListener('click', function(e) { e.stopPropagation(); _userDrop.classList.toggle('open'); });
+      document.addEventListener('click', function() { _userDrop.classList.remove('open'); });
+      document.getElementById('logout-link').addEventListener('click', function(e) {
+        e.preventDefault();
+        fetch('/api/auth/logout', { method: 'POST' }).then(function() { window.location.href = '/login'; });
+      });
+    }
+`;
+
+function page(title: string, extraStyles: string, body: string, script: string, user: SessionUser | null, currentPath: string, cdnScripts: string[] = []): string {
   const cdnTags = cdnScripts.map((src) => `<script src="${src}"></script>`).join("\n  ");
+  const navHtml = user ? `
+  <nav class="top-nav">${renderNav(currentPath, user)}</nav>
+  <div class="page-header">
+    <h1>${title}</h1>
+    <div class="user-menu">
+      <button class="user-avatar" id="user-avatar-btn">${user.name.charAt(0).toUpperCase()}</button>
+      <div class="user-dropdown" id="user-dropdown">
+        <div class="ud-info"><div class="ud-name">${user.name}</div><div class="ud-role">${user.role}</div></div>
+        <a href="#" id="logout-link">Log out</a>
+      </div>
+    </div>
+  </div>` : `<div style="padding:0"></div>`;
+  const bodyPadding = user ? '' : 'body{padding-top:0;}';
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
   <title>FabWorks — ${title}</title>
-  <style>${SHARED_STYLES}${extraStyles}</style>
+  <style>${SHARED_STYLES}${bodyPadding}${extraStyles}</style>
 </head>
 <body>
-  <header>
-    <h1>${title}</h1>
-    <nav>${nav}</nav>
-  </header>
+  ${navHtml}
   ${body}
   ${cdnTags}
-  <script>${script}</script>
+  <script>${user ? USER_MENU_JS : ""}${script}</script>
 </body>
 </html>`;
 }
-
-const NAV_SCAN = '<a href="/">Scan</a>';
-const NAV_NEW = '<a href="/jobs/new">+ Job</a>';
-const NAV_DASH = '<a href="/dashboard">Dashboard</a>';
-const NAV_STATIONS = '<a href="/stations">Stations</a>';
-const NAV_KPI = '<a href="/kpi">KPI</a>';
-const NAV_TAKT = '<a href="/takt">Takt</a>';
-const NAV_ADMIN = '<a href="/admin">Admin</a>';
 
 function stationNamesJS(config: TenantConfig): string {
   const map: Record<string, string> = {};
@@ -167,7 +258,7 @@ export function loginPage(): string {
     .login-card h2 { font-size: 1.4rem; margin-bottom: 20px; text-align: center; }
     .login-card .field { margin-bottom: 16px; }
     .login-error { color: var(--error); font-size: 0.85rem; text-align: center; margin-top: 8px; display: none; }
-  `, "", `
+  `, `
   <main>
     <div class="card login-card">
       <h2>FabWorks</h2>
@@ -222,7 +313,7 @@ export function loginPage(): string {
 
     loginBtn.addEventListener('click', doLogin);
     pinInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') doLogin(); });
-  `);
+  `, null, "/login");
 }
 
 // ─── SCAN PAGE ────────────────────────────────────────────
@@ -255,9 +346,6 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
     .entity-row.selected { border-color: var(--accent); background: rgba(59,130,246,0.1); }
     .entity-row .name { font-weight: 600; font-size: 0.9rem; }
     .entity-row .meta { font-size: 0.75rem; color: var(--muted); }
-    .scanned-by-row { display: flex; gap: 8px; align-items: center; }
-    .scanned-by-row input { flex: 1; }
-    .remember-label { font-size: 0.75rem; color: var(--muted); display: flex; align-items: center; gap: 4px; white-space: nowrap; }
     .section-label { font-size: 0.75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
     #context-panel { display: none; }
     .job-input-row { display: flex; gap: 8px; align-items: center; }
@@ -286,14 +374,7 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
       opacity: 0; transition: opacity 0.2s; pointer-events: none; z-index: 100;
     }
     .swipe-toast.show { opacity: 1; }
-    .user-menu { position: relative; }
-    .user-btn { background: none; border: 1px solid var(--border); border-radius: 6px; color: var(--muted); font-size: 0.75rem; padding: 4px 10px; cursor: pointer; }
-    .user-btn:hover { color: var(--text); border-color: var(--accent); }
-    .user-dropdown { display: none; position: absolute; right: 0; top: 100%; margin-top: 4px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; min-width: 140px; z-index: 50; overflow: hidden; }
-    .user-dropdown.open { display: block; }
-    .user-dropdown a { display: block; padding: 10px 14px; color: var(--text); text-decoration: none; font-size: 0.8rem; }
-    .user-dropdown a:hover { background: var(--bg); }
-`, `${NAV_NEW}${NAV_STATIONS}${NAV_DASH}${NAV_KPI}${NAV_TAKT}<div class="user-menu"><button class="user-btn" id="user-btn">${user.name}</button><div class="user-dropdown" id="user-dropdown">${user.role === "admin" ? '<a href="/admin">Admin</a>' : ''}<a href="#" id="logout-link">Log out</a></div></div>`, `
+  `, `
   <main>
     <div class="card">
       <div class="station-carousel" id="station-carousel">
@@ -318,13 +399,6 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
     <div class="card" id="context-panel">
       <div id="context-label" class="section-label"></div>
       <div class="entity-list" id="entity-list"></div>
-    </div>
-    <div class="card">
-      <label>Scanned By</label>
-      <div class="scanned-by-row">
-        <input type="text" id="scanned-by" placeholder="Name">
-        <label class="remember-label"><input type="checkbox" id="remember-name" checked> Save</label>
-      </div>
     </div>
     <button class="btn btn-primary" id="scan-btn" disabled>Log Scan</button>
     <div class="result" id="result"></div>
@@ -351,20 +425,7 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
     var entityList = document.getElementById('entity-list');
     var scanBtn = document.getElementById('scan-btn');
     var resultDiv = document.getElementById('result');
-    var scannedByInput = document.getElementById('scanned-by');
-    var rememberCheck = document.getElementById('remember-name');
-
-    scannedByInput.value = ${JSON.stringify(user.name)};
-
-    // User menu
-    var userBtn = document.getElementById('user-btn');
-    var userDrop = document.getElementById('user-dropdown');
-    userBtn.addEventListener('click', function(e) { e.stopPropagation(); userDrop.classList.toggle('open'); });
-    document.addEventListener('click', function() { userDrop.classList.remove('open'); });
-    document.getElementById('logout-link').addEventListener('click', function(e) {
-      e.preventDefault();
-      fetch('/api/auth/logout', { method: 'POST' }).then(function() { window.location.href = '/login'; });
-    });
+    var USER_NAME = ${JSON.stringify(user.name)};
 
     function getStation(slug) {
       for (var i = 0; i < STATIONS.length; i++) {
@@ -486,13 +547,11 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
       resultDiv.className = 'result';
       resultDiv.style.display = 'none';
 
-      if (rememberCheck.checked) localStorage.setItem('fw_name', scannedByInput.value);
-
       var station = getStation(selectedStation);
       var payload = {
         station: selectedStation,
         job_id: jobData.id,
-        scanned_by: scannedByInput.value.trim() || undefined,
+        scanned_by: USER_NAME,
       };
       if (station.level === 'l2') payload.bucket_id = selectedEntityId;
       if (station.level === 'l3') payload.cabinet_id = selectedEntityId;
@@ -690,11 +749,11 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
         }
       }
     }, { passive: true });
-`, ["https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"]);
+`, user, "/", ["https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"]);
 }
 
 // ─── NEW JOB PAGE ────────────────────────────────────────
-export function newJobPage(config: TenantConfig): string {
+export function newJobPage(config: TenantConfig, user: SessionUser): string {
   const L1 = config.entity_labels.l1;
   const L3 = config.entity_labels.l3;
   return page(`New ${L1}`, `
@@ -706,7 +765,7 @@ export function newJobPage(config: TenantConfig): string {
     .recent-job:last-child { border-bottom: none; }
     .recent-job .num { font-weight: 600; }
     .recent-job a { color: var(--accent); text-decoration: none; font-size: 0.8rem; }
-`, `${NAV_SCAN}${NAV_STATIONS}${NAV_DASH}${NAV_KPI}${NAV_TAKT}`, `
+`, `
   <main>
     <div class="card">
       <label>${L1} Number</label>
@@ -785,11 +844,11 @@ export function newJobPage(config: TenantConfig): string {
       });
     }
     loadRecent();
-`);
+`, user, "/jobs/new");
 }
 
 // ─── JOB DETAIL PAGE ────────────────────────────────────
-export function jobDetailPage(config: TenantConfig): string {
+export function jobDetailPage(config: TenantConfig, user: SessionUser): string {
   const L2 = config.entity_labels.l2;
   const L3 = config.entity_labels.l3;
   return page(`${config.entity_labels.l1} Detail`, `
@@ -836,7 +895,7 @@ export function jobDetailPage(config: TenantConfig): string {
       .qr-label { border: 1px solid #ccc; break-inside: avoid; }
       main { padding: 0 !important; max-width: none !important; }
     }
-`, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_DASH}${NAV_KPI}${NAV_TAKT}`, `
+`, `
   <main>
     <div id="loading" style="color:var(--muted);text-align:center;padding:48px">Loading...</div>
     <div id="content" style="display:none">
@@ -1024,11 +1083,11 @@ export function jobDetailPage(config: TenantConfig): string {
 
       setTimeout(function() { window.print(); }, 300);
     });
-`, ["https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"]);
+`, user, "/dashboard", ["https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js"]);
 }
 
 // ─── DASHBOARD ────────────────────────────────────────────
-export function dashboardPage(config: TenantConfig): string {
+export function dashboardPage(config: TenantConfig, user: SessionUser): string {
   return page("Dashboard", `
     main { padding: 16px; max-width: 1100px; margin: 0 auto; }
     .top-bar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
@@ -1064,7 +1123,7 @@ export function dashboardPage(config: TenantConfig): string {
     .feed-meta { color: var(--muted); font-size: 0.7rem; margin-top: 2px; }
     .empty { text-align: center; padding: 48px 16px; color: var(--muted); }
     .empty a { color: var(--accent); text-decoration: none; }
-`, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_KPI}${NAV_TAKT}`, `
+`, `
   <main>
     <div class="top-bar">
       <span id="updated"></span>
@@ -1176,11 +1235,11 @@ export function dashboardPage(config: TenantConfig): string {
     refreshBtn.addEventListener('click', load);
     load();
     startAuto();
-`);
+`, user, "/dashboard");
 }
 
 // ─── STATION VIEW PAGE ──────────────────────────────────────
-export function stationViewPage(config: TenantConfig): string {
+export function stationViewPage(config: TenantConfig, user: SessionUser): string {
   return page("Station View", `
     main { flex: 1; padding: 16px; max-width: 600px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
     .station-carousel { display: flex; align-items: center; justify-content: center; gap: 0; user-select: none; }
@@ -1215,7 +1274,7 @@ export function stationViewPage(config: TenantConfig): string {
       opacity: 0; transition: opacity 0.2s; pointer-events: none; z-index: 100;
     }
     .swipe-toast.show { opacity: 1; }
-`, `${NAV_SCAN}${NAV_NEW}${NAV_DASH}${NAV_KPI}${NAV_TAKT}`, `
+`, `
   <main>
     <div class="card">
       <div class="station-carousel" id="station-carousel">
@@ -1381,11 +1440,11 @@ export function stationViewPage(config: TenantConfig): string {
         showToast('Refreshed');
       }
     }, { passive: true });
-`);
+`, user, "/stations");
 }
 
 // ─── PROGRESS MATRIX PAGE ──────────────────────────────────
-export function progressPage(config: TenantConfig): string {
+export function progressPage(config: TenantConfig, user: SessionUser): string {
   const L2 = config.entity_labels.l2;
   const L3 = config.entity_labels.l3;
   return page(`${config.entity_labels.l1} Progress`, `
@@ -1410,7 +1469,7 @@ export function progressPage(config: TenantConfig): string {
     .dot-current { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
     .summary { font-size: 0.8rem; color: var(--muted); }
     .summary .done { color: var(--success); font-weight: 600; }
-  `, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_DASH}${NAV_KPI}${NAV_TAKT}`, `
+  `, `
   <main>
     <div id="loading" style="color:var(--muted);text-align:center;padding:48px">Loading...</div>
     <div id="content" style="display:none">
@@ -1544,11 +1603,11 @@ export function progressPage(config: TenantConfig): string {
         });
       });
     });
-  `);
+  `, user, "/dashboard");
 }
 
 // ─── KPI DASHBOARD ──────────────────────────────────────
-export function kpiPage(config: TenantConfig): string {
+export function kpiPage(config: TenantConfig, user: SessionUser): string {
   return page("Assembler KPI", `
     main { flex: 1; padding: 16px; max-width: 900px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
     .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
@@ -1587,7 +1646,7 @@ export function kpiPage(config: TenantConfig): string {
     .summary-stat .lbl { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; }
     .empty-state { text-align: center; padding: 48px 16px; color: var(--muted); }
     .station-info { font-size: 0.75rem; color: var(--muted); }
-  `, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_DASH}${NAV_TAKT}`, `
+  `, `
   <main>
     <div class="controls">
       <span class="label">Time Range</span>
@@ -1693,11 +1752,11 @@ export function kpiPage(config: TenantConfig): string {
 
     daysSelect.addEventListener('change', load);
     load();
-  `);
+  `, user, "/kpi");
 }
 
 // ─── TAKT TIME / DWELL TIME ──────────────────────────────
-export function taktPage(config: TenantConfig): string {
+export function taktPage(config: TenantConfig, user: SessionUser): string {
   return page("Takt Time", `
     main { flex: 1; padding: 16px; max-width: 900px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
     .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
@@ -1748,7 +1807,7 @@ export function taktPage(config: TenantConfig): string {
       background: rgba(239,68,68,0.15); color: var(--error); padding: 2px 6px; border-radius: 4px;
       margin-left: 6px;
     }
-  `, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_DASH}${NAV_KPI}`, `
+  `, `
   <main>
     <div class="controls">
       <span class="label">Time Range</span>
@@ -1860,11 +1919,11 @@ export function taktPage(config: TenantConfig): string {
 
     daysSelect.addEventListener('change', load);
     load();
-  `);
+  `, user, "/takt");
 }
 
 // ─── ADMIN PANEL ──────────────────────────────────────
-export function adminPage(config: TenantConfig): string {
+export function adminPage(config: TenantConfig, user: SessionUser): string {
   const ROLES: string[] = ["user", "lead", "supervisor", "admin"];
   const SHOP_TYPES: string[] = ["cabinet", "metal", "wood"];
   return page("Admin", `
@@ -1926,7 +1985,7 @@ export function adminPage(config: TenantConfig): string {
     .msg { padding: 10px 14px; border-radius: 8px; font-size: 0.85rem; font-weight: 600; text-align: center; display: none; margin-top: 8px; }
     .msg.success { display: block; background: rgba(34,197,94,0.15); border: 1px solid var(--success); color: var(--success); }
     .msg.error { display: block; background: rgba(239,68,68,0.15); border: 1px solid var(--error); color: var(--error); }
-  `, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_DASH}${NAV_KPI}${NAV_TAKT}`, `
+  `, `
   <main>
     <div class="tabs">
       <div class="tab active" data-tab="users">Users</div>
@@ -2243,5 +2302,5 @@ export function adminPage(config: TenantConfig): string {
     });
 
     loadConfig();
-  `);
+  `, user, "/admin");
 }

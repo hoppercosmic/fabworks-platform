@@ -502,7 +502,7 @@ app.post("/api/scan", async (c) => {
     body.bucket_id || null,
     body.cabinet_id || null,
     body.station,
-    body.scanned_by || null,
+    body.scanned_by || c.get("user")?.name || null,
     body.note || null,
   ).first<{ id: number; scanned_at: string }>();
 
@@ -869,13 +869,13 @@ app.get("/login", (c) => {
   return c.html(loginPage());
 });
 app.get("/", requireAuth(), (c) => c.html(scanPage(c.get("config"), c.get("user")!)));
-app.get("/jobs/new", requireAuth(), (c) => c.html(newJobPage(c.get("config"))));
-app.get("/dashboard", requireAuth(), (c) => c.html(dashboardPage(c.get("config"))));
-app.get("/job/:id", requireAuth(), (c) => c.html(jobDetailPage(c.get("config"))));
-app.get("/stations", requireAuth(), (c) => c.html(stationViewPage(c.get("config"))));
-app.get("/job/:id/progress", requireAuth(), (c) => c.html(progressPage(c.get("config"))));
-app.get("/kpi", requireAuth("lead"), (c) => c.html(kpiPage(c.get("config"))));
-app.get("/takt", requireAuth("lead"), (c) => c.html(taktPage(c.get("config"))));
-app.get("/admin", requireAuth("admin"), (c) => c.html(adminPage(c.get("config"))));
+app.get("/jobs/new", requireAuth(), (c) => c.html(newJobPage(c.get("config"), c.get("user")!)));
+app.get("/dashboard", requireAuth(), (c) => c.html(dashboardPage(c.get("config"), c.get("user")!)));
+app.get("/job/:id", requireAuth(), (c) => c.html(jobDetailPage(c.get("config"), c.get("user")!)));
+app.get("/stations", requireAuth(), (c) => c.html(stationViewPage(c.get("config"), c.get("user")!)));
+app.get("/job/:id/progress", requireAuth(), (c) => c.html(progressPage(c.get("config"), c.get("user")!)));
+app.get("/kpi", requireAuth("lead"), (c) => c.html(kpiPage(c.get("config"), c.get("user")!)));
+app.get("/takt", requireAuth("lead"), (c) => c.html(taktPage(c.get("config"), c.get("user")!)));
+app.get("/admin", requireAuth("admin"), (c) => c.html(adminPage(c.get("config"), c.get("user")!)));
 
 export default app;
