@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage } from "./ui";
+import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage } from "./ui";
 
 // --- Types ---
 
@@ -876,5 +876,6 @@ app.get("/stations", requireAuth(), (c) => c.html(stationViewPage(c.get("config"
 app.get("/job/:id/progress", requireAuth(), (c) => c.html(progressPage(c.get("config"))));
 app.get("/kpi", requireAuth("lead"), (c) => c.html(kpiPage(c.get("config"))));
 app.get("/takt", requireAuth("lead"), (c) => c.html(taktPage(c.get("config"))));
+app.get("/admin", requireAuth("admin"), (c) => c.html(adminPage(c.get("config"))));
 
 export default app;
