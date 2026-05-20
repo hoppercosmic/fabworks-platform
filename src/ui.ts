@@ -126,6 +126,7 @@ const NAV_SCAN = '<a href="/">Scan</a>';
 const NAV_NEW = '<a href="/jobs/new">+ Job</a>';
 const NAV_DASH = '<a href="/dashboard">Dashboard</a>';
 const NAV_STATIONS = '<a href="/stations">Stations</a>';
+const NAV_KPI = '<a href="/kpi">KPI</a>';
 
 function stationNamesJS(config: TenantConfig): string {
   const map: Record<string, string> = {};
@@ -290,7 +291,7 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
     .user-dropdown.open { display: block; }
     .user-dropdown a { display: block; padding: 10px 14px; color: var(--text); text-decoration: none; font-size: 0.8rem; }
     .user-dropdown a:hover { background: var(--bg); }
-`, `${NAV_NEW}${NAV_STATIONS}${NAV_DASH}<div class="user-menu"><button class="user-btn" id="user-btn">${user.name}</button><div class="user-dropdown" id="user-dropdown"><a href="#" id="logout-link">Log out</a></div></div>`, `
+`, `${NAV_NEW}${NAV_STATIONS}${NAV_DASH}${NAV_KPI}<div class="user-menu"><button class="user-btn" id="user-btn">${user.name}</button><div class="user-dropdown" id="user-dropdown"><a href="#" id="logout-link">Log out</a></div></div>`, `
   <main>
     <div class="card">
       <div class="station-carousel" id="station-carousel">
@@ -703,7 +704,7 @@ export function newJobPage(config: TenantConfig): string {
     .recent-job:last-child { border-bottom: none; }
     .recent-job .num { font-weight: 600; }
     .recent-job a { color: var(--accent); text-decoration: none; font-size: 0.8rem; }
-`, `${NAV_SCAN}${NAV_STATIONS}${NAV_DASH}`, `
+`, `${NAV_SCAN}${NAV_STATIONS}${NAV_DASH}${NAV_KPI}`, `
   <main>
     <div class="card">
       <label>${L1} Number</label>
@@ -833,7 +834,7 @@ export function jobDetailPage(config: TenantConfig): string {
       .qr-label { border: 1px solid #ccc; break-inside: avoid; }
       main { padding: 0 !important; max-width: none !important; }
     }
-`, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_DASH}`, `
+`, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_DASH}${NAV_KPI}`, `
   <main>
     <div id="loading" style="color:var(--muted);text-align:center;padding:48px">Loading...</div>
     <div id="content" style="display:none">
@@ -1061,7 +1062,7 @@ export function dashboardPage(config: TenantConfig): string {
     .feed-meta { color: var(--muted); font-size: 0.7rem; margin-top: 2px; }
     .empty { text-align: center; padding: 48px 16px; color: var(--muted); }
     .empty a { color: var(--accent); text-decoration: none; }
-`, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}`, `
+`, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_KPI}`, `
   <main>
     <div class="top-bar">
       <span id="updated"></span>
@@ -1212,7 +1213,7 @@ export function stationViewPage(config: TenantConfig): string {
       opacity: 0; transition: opacity 0.2s; pointer-events: none; z-index: 100;
     }
     .swipe-toast.show { opacity: 1; }
-`, `${NAV_SCAN}${NAV_NEW}${NAV_DASH}`, `
+`, `${NAV_SCAN}${NAV_NEW}${NAV_DASH}${NAV_KPI}`, `
   <main>
     <div class="card">
       <div class="station-carousel" id="station-carousel">
@@ -1407,7 +1408,7 @@ export function progressPage(config: TenantConfig): string {
     .dot-current { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
     .summary { font-size: 0.8rem; color: var(--muted); }
     .summary .done { color: var(--success); font-weight: 600; }
-  `, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_DASH}`, `
+  `, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_DASH}${NAV_KPI}`, `
   <main>
     <div id="loading" style="color:var(--muted);text-align:center;padding:48px">Loading...</div>
     <div id="content" style="display:none">
@@ -1541,5 +1542,154 @@ export function progressPage(config: TenantConfig): string {
         });
       });
     });
+  `);
+}
+
+// ─── KPI DASHBOARD ──────────────────────────────────────
+export function kpiPage(config: TenantConfig): string {
+  return page("Assembler KPI", `
+    main { flex: 1; padding: 16px; max-width: 900px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+    .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .controls select { width: auto; padding: 8px 12px; font-size: 0.85rem; }
+    .controls .label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+    .kpi-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+      padding: 16px; display: flex; flex-direction: column; gap: 12px;
+    }
+    .kpi-card .name { font-size: 1.1rem; font-weight: 700; }
+    .kpi-card .rank { font-size: 0.7rem; color: var(--muted); }
+    .kpi-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .kpi-stat { text-align: center; }
+    .kpi-stat .val { font-size: 1.4rem; font-weight: 700; }
+    .kpi-stat .lbl { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+    .kpi-stat .val.accent { color: var(--accent); }
+    .kpi-stat .val.success { color: var(--success); }
+    .kpi-stat .val.warning { color: var(--warning); }
+    .kpi-stat .val.purple { color: var(--purple); }
+    .kpi-bar-row { display: flex; align-items: center; gap: 6px; font-size: 0.7rem; color: var(--muted); }
+    .kpi-bar-row .day-label { width: 40px; text-align: right; flex-shrink: 0; }
+    .kpi-bar-track { flex: 1; height: 14px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+    .kpi-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
+    .kpi-bar-fill.blue { background: var(--accent); }
+    .kpi-bar-row .count { width: 20px; font-weight: 600; }
+    .kpi-timing { font-size: 0.75rem; color: var(--muted); display: flex; justify-content: space-between; }
+    .kpi-timing .fast { color: var(--success); }
+    .kpi-timing .slow { color: var(--warning); }
+    .summary-bar {
+      display: flex; gap: 24px; flex-wrap: wrap; padding: 12px 16px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    }
+    .summary-stat { text-align: center; }
+    .summary-stat .val { font-size: 1.5rem; font-weight: 700; color: var(--accent); }
+    .summary-stat .lbl { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; }
+    .empty-state { text-align: center; padding: 48px 16px; color: var(--muted); }
+    .station-info { font-size: 0.75rem; color: var(--muted); }
+  `, `${NAV_SCAN}${NAV_NEW}${NAV_STATIONS}${NAV_DASH}`, `
+  <main>
+    <div class="controls">
+      <span class="label">Time Range</span>
+      <select id="days-select">
+        <option value="7">Last 7 days</option>
+        <option value="14">Last 14 days</option>
+        <option value="30" selected>Last 30 days</option>
+        <option value="90">Last 90 days</option>
+      </select>
+    </div>
+    <div id="station-info" class="station-info"></div>
+    <div id="summary" class="summary-bar" style="display:none"></div>
+    <div id="kpi-grid" class="kpi-grid"></div>
+    <div id="empty" class="empty-state" style="display:none">No assembly data in this time range</div>
+  </main>
+  `, `
+    var LABELS = ${JSON.stringify(config.entity_labels)};
+    var daysSelect = document.getElementById('days-select');
+    var gridDiv = document.getElementById('kpi-grid');
+    var summaryDiv = document.getElementById('summary');
+    var emptyDiv = document.getElementById('empty');
+    var stationInfo = document.getElementById('station-info');
+
+    function fmtMin(m) {
+      if (m == null) return '—';
+      if (m < 60) return m + 'm';
+      var h = Math.floor(m / 60);
+      var rm = Math.round(m % 60);
+      return h + 'h ' + rm + 'm';
+    }
+
+    function load() {
+      var days = daysSelect.value;
+      fetch('/api/kpi/assemblers?days=' + days)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          var assemblers = data.assemblers || [];
+          var daily = data.daily || {};
+
+          stationInfo.textContent = data.start_station && data.end_station
+            ? 'Measuring cycle time from ' + data.start_station + ' to ' + data.end_station
+            : '';
+
+          if (assemblers.length === 0) {
+            gridDiv.innerHTML = '';
+            summaryDiv.style.display = 'none';
+            emptyDiv.style.display = 'block';
+            return;
+          }
+          emptyDiv.style.display = 'none';
+
+          var totalCompleted = 0;
+          var totalStarted = 0;
+          var allAvg = [];
+          assemblers.forEach(function(a) {
+            totalCompleted += a.total_completed;
+            totalStarted += a.total_started;
+            if (a.avg_minutes != null) allAvg.push(a.avg_minutes);
+          });
+          var teamAvg = allAvg.length > 0 ? Math.round(allAvg.reduce(function(s,v){return s+v;},0) / allAvg.length * 10) / 10 : null;
+
+          summaryDiv.style.display = 'flex';
+          summaryDiv.innerHTML =
+            '<div class="summary-stat"><div class="val">' + totalCompleted + '</div><div class="lbl">' + LABELS.l3 + 's Completed</div></div>' +
+            '<div class="summary-stat"><div class="val">' + assemblers.length + '</div><div class="lbl">Assemblers</div></div>' +
+            '<div class="summary-stat"><div class="val">' + fmtMin(teamAvg) + '</div><div class="lbl">Team Avg Cycle</div></div>' +
+            '<div class="summary-stat"><div class="val">' + days + 'd</div><div class="lbl">Time Range</div></div>';
+
+          var maxDaily = 1;
+          Object.keys(daily).forEach(function(name) {
+            daily[name].forEach(function(d) { if (d.completed > maxDaily) maxDaily = d.completed; });
+          });
+
+          gridDiv.innerHTML = assemblers.map(function(a, idx) {
+            var days7 = (daily[a.assembler] || []).slice(-7);
+
+            var barsHtml = days7.map(function(d) {
+              var pct = Math.round((d.completed / maxDaily) * 100);
+              var dayLabel = d.day.slice(5);
+              return '<div class="kpi-bar-row">' +
+                '<span class="day-label">' + dayLabel + '</span>' +
+                '<div class="kpi-bar-track"><div class="kpi-bar-fill blue" style="width:' + pct + '%"></div></div>' +
+                '<span class="count">' + d.completed + '</span></div>';
+            }).join('');
+
+            return '<div class="kpi-card">' +
+              '<div><span class="name">' + a.assembler + '</span> <span class="rank">#' + (idx + 1) + '</span></div>' +
+              '<div class="kpi-stats">' +
+                '<div class="kpi-stat"><div class="val success">' + a.total_completed + '</div><div class="lbl">Completed</div></div>' +
+                '<div class="kpi-stat"><div class="val accent">' + a.per_day + '</div><div class="lbl">Per Day</div></div>' +
+                '<div class="kpi-stat"><div class="val purple">' + fmtMin(a.avg_minutes) + '</div><div class="lbl">Avg Cycle</div></div>' +
+                '<div class="kpi-stat"><div class="val">' + a.active_days + '</div><div class="lbl">Active Days</div></div>' +
+              '</div>' +
+              '<div class="kpi-timing">' +
+                '<span class="fast">Best: ' + fmtMin(a.min_minutes) + '</span>' +
+                '<span class="slow">Slowest: ' + fmtMin(a.max_minutes) + '</span>' +
+              '</div>' +
+              (barsHtml ? '<div>' + barsHtml + '</div>' : '') +
+            '</div>';
+          }).join('');
+        });
+    }
+
+    daysSelect.addEventListener('change', load);
+    load();
   `);
 }

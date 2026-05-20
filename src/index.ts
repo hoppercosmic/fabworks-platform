@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage } from "./ui";
+import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage } from "./ui";
 
 // --- Types ---
 
@@ -584,6 +584,79 @@ app.get("/api/metrics/assembly", async (c) => {
   return c.json(result.results);
 });
 
+// --- Assembler KPI ---
+
+app.get("/api/kpi/assemblers", requireAuth("lead"), async (c) => {
+  const config = c.get("config");
+  const days = parseInt(c.req.query("days") || "30");
+
+  const l3Stations = config.stations.filter((s) => s.level === "l3" && s.sets_status);
+  const startStation = l3Stations[0]?.slug;
+  const endStation = l3Stations[1]?.slug;
+  if (!startStation || !endStation) return c.json({ assemblers: [], start_station: null, end_station: null });
+
+  const result = await c.env.DB.prepare(
+    `SELECT
+       starts.scanned_by as assembler,
+       COUNT(*) as total_started,
+       COUNT(completes.id) as total_completed,
+       ROUND(AVG(CASE WHEN completes.id IS NOT NULL
+         THEN (julianday(completes.scanned_at) - julianday(starts.scanned_at)) * 1440
+         END), 1) as avg_minutes,
+       ROUND(MIN(CASE WHEN completes.id IS NOT NULL
+         THEN (julianday(completes.scanned_at) - julianday(starts.scanned_at)) * 1440
+         END), 1) as min_minutes,
+       ROUND(MAX(CASE WHEN completes.id IS NOT NULL
+         THEN (julianday(completes.scanned_at) - julianday(starts.scanned_at)) * 1440
+         END), 1) as max_minutes,
+       COUNT(DISTINCT DATE(starts.scanned_at)) as active_days,
+       ROUND(CAST(COUNT(completes.id) AS REAL) / MAX(COUNT(DISTINCT DATE(starts.scanned_at)), 1), 1) as per_day
+     FROM scans starts
+     LEFT JOIN scans completes
+       ON completes.cabinet_id = starts.cabinet_id
+       AND completes.station = ?
+       AND completes.scanned_at > starts.scanned_at
+     WHERE starts.station = ?
+       AND starts.scanned_by IS NOT NULL
+       AND starts.scanned_by != ''
+       AND starts.scanned_at >= datetime('now', '-' || ? || ' days')
+     GROUP BY starts.scanned_by
+     ORDER BY total_completed DESC`
+  ).bind(endStation, startStation, days).all();
+
+  const daily = await c.env.DB.prepare(
+    `SELECT
+       starts.scanned_by as assembler,
+       DATE(starts.scanned_at) as day,
+       COUNT(completes.id) as completed
+     FROM scans starts
+     LEFT JOIN scans completes
+       ON completes.cabinet_id = starts.cabinet_id
+       AND completes.station = ?
+       AND completes.scanned_at > starts.scanned_at
+     WHERE starts.station = ?
+       AND starts.scanned_by IS NOT NULL
+       AND starts.scanned_by != ''
+       AND starts.scanned_at >= datetime('now', '-' || ? || ' days')
+     GROUP BY starts.scanned_by, DATE(starts.scanned_at)
+     ORDER BY day ASC`
+  ).bind(endStation, startStation, days).all();
+
+  const dailyByAssembler: Record<string, Array<{ day: string; completed: number }>> = {};
+  for (const row of daily.results as Array<{ assembler: string; day: string; completed: number }>) {
+    if (!dailyByAssembler[row.assembler]) dailyByAssembler[row.assembler] = [];
+    dailyByAssembler[row.assembler].push({ day: row.day, completed: row.completed });
+  }
+
+  return c.json({
+    assemblers: result.results,
+    daily: dailyByAssembler,
+    start_station: config.stations.find((s) => s.slug === startStation)?.name,
+    end_station: config.stations.find((s) => s.slug === endStation)?.name,
+    days,
+  });
+});
+
 // --- Station view ---
 
 app.get("/api/stations/:slug/items", async (c) => {
@@ -667,5 +740,6 @@ app.get("/dashboard", requireAuth(), (c) => c.html(dashboardPage(c.get("config")
 app.get("/job/:id", requireAuth(), (c) => c.html(jobDetailPage(c.get("config"))));
 app.get("/stations", requireAuth(), (c) => c.html(stationViewPage(c.get("config"))));
 app.get("/job/:id/progress", requireAuth(), (c) => c.html(progressPage(c.get("config"))));
+app.get("/kpi", requireAuth("lead"), (c) => c.html(kpiPage(c.get("config"))));
 
 export default app;
