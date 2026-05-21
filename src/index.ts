@@ -796,6 +796,7 @@ app.get("/api/kpi/takt", requireAuth("lead"), async (c) => {
 app.get("/api/stations/:slug/items", async (c) => {
   const config = c.get("config");
   const slug = c.req.param("slug");
+  const date = c.req.query("date") || null;
   const stationDef = config.stations.find((s) => s.slug === slug);
   if (!stationDef) return c.json({ error: `Unknown station: ${slug}` }, 400);
 
@@ -804,62 +805,170 @@ app.get("/api/stations/:slug/items", async (c) => {
     .map((s) => s.slug);
 
   const laterPlaceholders = laterStations.map(() => "?").join(",");
+  const dateFilter = date ? " AND DATE(s.scanned_at) = ?" : "";
+  const dateBinds = date ? [date] : [];
 
   if (stationDef.level === "l1") {
-    const query = laterStations.length > 0
+    const query = (laterStations.length > 0 && !date)
       ? `SELECT DISTINCT j.id, j.job_number, j.job_name, j.cabinet_count, s.scanned_at
          FROM jobs j
          JOIN scans s ON s.job_id = j.id AND s.station = ?
-         WHERE j.status = 'active'
+         WHERE j.status = 'active'${dateFilter}
          AND NOT EXISTS (SELECT 1 FROM scans s2 WHERE s2.job_id = j.id AND s2.station IN (${laterPlaceholders}))
          ORDER BY s.scanned_at DESC`
       : `SELECT DISTINCT j.id, j.job_number, j.job_name, j.cabinet_count, s.scanned_at
          FROM jobs j
          JOIN scans s ON s.job_id = j.id AND s.station = ?
-         WHERE j.status = 'active'
+         WHERE j.status = 'active'${dateFilter}
          ORDER BY s.scanned_at DESC`;
-    const result = await c.env.DB.prepare(query).bind(slug, ...laterStations).all();
+    const binds = (laterStations.length > 0 && !date) ? [slug, ...dateBinds, ...laterStations] : [slug, ...dateBinds];
+    const result = await c.env.DB.prepare(query).bind(...binds).all();
     return c.json({ level: "l1", items: result.results });
   }
 
   if (stationDef.level === "l2") {
-    const query = laterStations.length > 0
+    const query = (laterStations.length > 0 && !date)
       ? `SELECT DISTINCT b.id, b.name, b.cabinet_count, b.status, j.id as job_id, j.job_number, j.job_name, s.scanned_at
          FROM buckets b
          JOIN jobs j ON b.job_id = j.id
          JOIN scans s ON s.bucket_id = b.id AND s.station = ?
-         WHERE j.status = 'active'
+         WHERE j.status = 'active'${dateFilter}
          AND NOT EXISTS (SELECT 1 FROM scans s2 WHERE s2.bucket_id = b.id AND s2.station IN (${laterPlaceholders}))
          ORDER BY s.scanned_at DESC`
       : `SELECT DISTINCT b.id, b.name, b.cabinet_count, b.status, j.id as job_id, j.job_number, j.job_name, s.scanned_at
          FROM buckets b
          JOIN jobs j ON b.job_id = j.id
          JOIN scans s ON s.bucket_id = b.id AND s.station = ?
-         WHERE j.status = 'active'
+         WHERE j.status = 'active'${dateFilter}
          ORDER BY s.scanned_at DESC`;
-    const result = await c.env.DB.prepare(query).bind(slug, ...laterStations).all();
+    const binds = (laterStations.length > 0 && !date) ? [slug, ...dateBinds, ...laterStations] : [slug, ...dateBinds];
+    const result = await c.env.DB.prepare(query).bind(...binds).all();
     return c.json({ level: "l2", items: result.results });
   }
 
   // l3 level
-  const query = laterStations.length > 0
-    ? `SELECT DISTINCT cab.id, cab.cabinet_number, cab.label, cab.status, b.name as bucket_name, j.id as job_id, j.job_number, j.job_name, s.scanned_at
+  const query = (laterStations.length > 0 && !date)
+    ? `SELECT DISTINCT cab.id, cab.cabinet_number, cab.label, cab.status, cab.accessories, cab.notes, cab.assembly_sheet_url, b.name as bucket_name, j.id as job_id, j.job_number, j.job_name, s.scanned_at
        FROM cabinets cab
        JOIN jobs j ON cab.job_id = j.id
        LEFT JOIN buckets b ON cab.bucket_id = b.id
        JOIN scans s ON s.cabinet_id = cab.id AND s.station = ?
-       WHERE j.status = 'active'
+       WHERE j.status = 'active'${dateFilter}
        AND NOT EXISTS (SELECT 1 FROM scans s2 WHERE s2.cabinet_id = cab.id AND s2.station IN (${laterPlaceholders}))
        ORDER BY s.scanned_at DESC`
-    : `SELECT DISTINCT cab.id, cab.cabinet_number, cab.label, cab.status, b.name as bucket_name, j.id as job_id, j.job_number, j.job_name, s.scanned_at
+    : `SELECT DISTINCT cab.id, cab.cabinet_number, cab.label, cab.status, cab.accessories, cab.notes, cab.assembly_sheet_url, b.name as bucket_name, j.id as job_id, j.job_number, j.job_name, s.scanned_at
        FROM cabinets cab
        JOIN jobs j ON cab.job_id = j.id
        LEFT JOIN buckets b ON cab.bucket_id = b.id
        JOIN scans s ON s.cabinet_id = cab.id AND s.station = ?
-       WHERE j.status = 'active'
+       WHERE j.status = 'active'${dateFilter}
        ORDER BY s.scanned_at DESC`;
-  const result = await c.env.DB.prepare(query).bind(slug, ...laterStations).all();
+  const binds = (laterStations.length > 0 && !date) ? [slug, ...dateBinds, ...laterStations] : [slug, ...dateBinds];
+  const result = await c.env.DB.prepare(query).bind(...binds).all();
   return c.json({ level: "l3", items: result.results });
+});
+
+// --- Staging location ---
+
+app.put("/api/cabinets/:id/location", async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  const body = await c.req.json<{ location: string }>();
+  const location = (body.location || "").trim() || null;
+  await c.env.DB.prepare("UPDATE cabinets SET staging_location = ? WHERE id = ?").bind(location, id).run();
+  return c.json({ ok: true });
+});
+
+// --- Cabinet metadata (accessories, notes, assembly sheet) ---
+
+app.put("/api/cabinets/:id/metadata", requireAuth("lead"), async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  const body = await c.req.json<{ accessories?: string; notes?: string; assembly_sheet_url?: string }>();
+  const updates: string[] = [];
+  const binds: unknown[] = [];
+
+  if (body.accessories !== undefined) {
+    updates.push("accessories = ?");
+    binds.push((body.accessories || "").trim() || null);
+  }
+  if (body.notes !== undefined) {
+    updates.push("notes = ?");
+    binds.push((body.notes || "").trim() || null);
+  }
+  if (body.assembly_sheet_url !== undefined) {
+    const url = (body.assembly_sheet_url || "").trim();
+    if (url && !url.startsWith("http://") && !url.startsWith("https://")) {
+      return c.json({ error: "URL must start with http:// or https://" }, 400);
+    }
+    updates.push("assembly_sheet_url = ?");
+    binds.push(url || null);
+  }
+
+  if (updates.length === 0) return c.json({ error: "Nothing to update" }, 400);
+  binds.push(id);
+  await c.env.DB.prepare(`UPDATE cabinets SET ${updates.join(", ")} WHERE id = ?`).bind(...binds).run();
+  return c.json({ ok: true });
+});
+
+app.get("/api/stations/:slug/staging", async (c) => {
+  const config = c.get("config");
+  const slug = c.req.param("slug");
+  const stationDef = config.stations.find((s) => s.slug === slug);
+  if (!stationDef) return c.json({ error: `Unknown station: ${slug}` }, 400);
+  if (stationDef.sets_status !== config.l3_terminal_status) {
+    return c.json({ error: "Not the terminal station" }, 400);
+  }
+
+  const date = c.req.query("date") || null;
+  const dateFilter = date ? " AND DATE(s.scanned_at) = ?" : "";
+  const dateFilter2 = date ? " AND DATE(s2.scanned_at) = ?" : "";
+  const subBinds = date ? [slug, date] : [slug];
+  const existsBinds = date ? [slug, date] : [slug];
+
+  const rows = await c.env.DB.prepare(`
+    SELECT j.id as job_id, j.job_number, j.job_name, j.cabinet_count,
+           cab.id as cab_id, cab.cabinet_number, cab.label, cab.status, cab.staging_location, cab.accessories, cab.notes, cab.assembly_sheet_url,
+           b.name as bucket_name,
+           (SELECT MAX(s.scanned_at) FROM scans s WHERE s.cabinet_id = cab.id AND s.station = ?${dateFilter}) as scanned_at
+    FROM jobs j
+    JOIN cabinets cab ON cab.job_id = j.id
+    LEFT JOIN buckets b ON cab.bucket_id = b.id
+    WHERE j.status = 'active'
+    AND EXISTS (SELECT 1 FROM scans s2 WHERE s2.station = ?${dateFilter2} AND s2.job_id = j.id)
+    ORDER BY j.job_number, cab.cabinet_number
+  `).bind(...subBinds, ...existsBinds).all();
+
+  const jobMap = new Map<number, { id: number; job_number: string; job_name: string; cabinet_count: number; staged_count: number; cabinets: unknown[] }>();
+  for (const r of rows.results as Record<string, unknown>[]) {
+    const jid = r.job_id as number;
+    if (!jobMap.has(jid)) {
+      jobMap.set(jid, {
+        id: jid,
+        job_number: r.job_number as string,
+        job_name: r.job_name as string,
+        cabinet_count: 0,
+        staged_count: 0,
+        cabinets: [],
+      });
+    }
+    const job = jobMap.get(jid)!;
+    job.cabinet_count++;
+    const isStaged = r.scanned_at != null;
+    if (isStaged) job.staged_count++;
+    job.cabinets.push({
+      id: r.cab_id,
+      cabinet_number: r.cabinet_number,
+      label: r.label,
+      status: r.status,
+      staging_location: r.staging_location,
+      accessories: r.accessories,
+      notes: r.notes,
+      assembly_sheet_url: r.assembly_sheet_url,
+      bucket_name: r.bucket_name,
+      scanned_at: r.scanned_at,
+    });
+  }
+
+  return c.json({ jobs: Array.from(jobMap.values()) });
 });
 
 // --- Pages ---

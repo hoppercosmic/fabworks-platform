@@ -374,6 +374,15 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
       opacity: 0; transition: opacity 0.2s; pointer-events: none; z-index: 100;
     }
     .swipe-toast.show { opacity: 1; }
+    .cab-meta-panel {
+      margin: -2px 0 6px; padding: 8px 12px; background: rgba(59,130,246,0.06);
+      border: 1px solid var(--border); border-top: none; border-radius: 0 0 8px 8px;
+      font-size: 0.8rem;
+    }
+    .cab-meta-panel .meta-label { font-weight: 600; font-size: 0.7rem; color: var(--muted); text-transform: uppercase; margin-top: 6px; }
+    .cab-meta-panel .meta-label:first-child { margin-top: 0; }
+    .cab-meta-panel .meta-value { margin-top: 2px; white-space: pre-line; }
+    .cab-meta-panel a { color: var(--accent); }
   `, `
   <main>
     <div class="card">
@@ -409,6 +418,7 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
     var LABELS = ${JSON.stringify(config.entity_labels)};
     ${displayStatusJS(config)}
     ${STATUS_COLOR_JS}
+    function escHtml(s) { return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
 
     var selectedStation = localStorage.getItem('fw_station') || null;
     var selectedEntityId = null;
@@ -517,9 +527,17 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
           return;
         }
         entityList.innerHTML = jobData.cabinets.map(function(cab) {
-          return '<div class="entity-row' + (selectedEntityId === cab.id ? ' selected' : '') + '" data-id="' + cab.id + '">' +
+          var row = '<div class="entity-row' + (selectedEntityId === cab.id ? ' selected' : '') + '" data-id="' + cab.id + '">' +
             '<div><div class="name">' + LABELS.l3 + ' ' + cab.cabinet_number + '</div><div class="meta">' + (cab.label || '') + '</div></div>' +
             '<span class="pill pill-' + pillColor(cab.status) + '">' + displayStatus(cab.status) + '</span></div>';
+          if (cab.accessories || cab.notes || cab.assembly_sheet_url) {
+            row += '<div class="cab-meta-panel">';
+            if (cab.accessories) row += '<div class="meta-label">Accessories</div><div class="meta-value">' + escHtml(cab.accessories) + '</div>';
+            if (cab.notes) row += '<div class="meta-label">Notes</div><div class="meta-value">' + escHtml(cab.notes) + '</div>';
+            if (cab.assembly_sheet_url) row += '<div class="meta-label">Assembly Sheet</div><div class="meta-value"><a href="' + escHtml(cab.assembly_sheet_url) + '" target="_blank" rel="noopener">Open Assembly Sheet ↗</a></div>';
+            row += '</div>';
+          }
+          return row;
         }).join('');
       }
 
@@ -879,6 +897,27 @@ export function jobDetailPage(config: TenantConfig, user: SessionUser): string {
     .cab-tile.assembled { border-color: var(--success); color: var(--success); }
     .cab-tile.staged { border-color: var(--purple); color: var(--purple); }
     .cab-tile .sub { font-weight: 400; font-size: 0.65rem; color: var(--muted); }
+    .cab-tile.clickable { cursor: pointer; }
+    .cab-tile.clickable:active { transform: scale(0.97); }
+    .cab-tile .meta-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--warning, #f59e0b); margin-left: 4px; vertical-align: middle; }
+    .cab-modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 200;
+      display: flex; align-items: center; justify-content: center; padding: 16px;
+    }
+    .cab-modal {
+      background: var(--surface); border-radius: 12px; padding: 20px;
+      width: 100%; max-width: 400px; max-height: 80vh; overflow-y: auto;
+    }
+    .cab-modal h3 { margin: 0 0 12px; font-size: 1rem; }
+    .cab-modal label { font-size: 0.75rem; font-weight: 600; color: var(--muted); display: block; margin: 10px 0 4px; }
+    .cab-modal textarea, .cab-modal input[type="url"] {
+      width: 100%; padding: 8px 10px; font-size: 0.85rem; border-radius: 6px;
+      border: 1px solid var(--border); background: var(--bg); color: var(--text);
+      font-family: inherit; resize: vertical; box-sizing: border-box;
+    }
+    .cab-modal textarea { min-height: 60px; }
+    .cab-modal .btn-row { display: flex; gap: 8px; margin-top: 16px; justify-content: flex-end; }
+    .cab-modal .sheet-link { color: var(--accent); font-size: 0.8rem; word-break: break-all; }
     .label-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-top: 12px; }
     .qr-label {
       background: white; color: #111; border-radius: 8px; padding: 12px;
@@ -937,12 +976,32 @@ export function jobDetailPage(config: TenantConfig, user: SessionUser): string {
         <div class="scan-log" id="scan-log"></div>
       </div>
     </div>
+    <div id="cab-modal-overlay" class="cab-modal-overlay" style="display:none">
+      <div class="cab-modal">
+        <h3 id="cab-modal-title"></h3>
+        <label>Accessories</label>
+        <textarea id="meta-accessories" placeholder="One per line, e.g.&#10;Soft close hinges&#10;Pull-out shelf"></textarea>
+        <label>Notes / Special Instructions</label>
+        <textarea id="meta-notes" placeholder="Modifications, custom requests..."></textarea>
+        <label>Assembly Sheet URL</label>
+        <input type="url" id="meta-sheet-url" placeholder="https://drive.google.com/...">
+        <div id="meta-sheet-preview" style="margin-top:4px"></div>
+        <div class="btn-row">
+          <button class="btn btn-sm" id="meta-cancel" style="background:var(--surface);border:1px solid var(--border);color:var(--text)">Cancel</button>
+          <button class="btn btn-sm" id="meta-save" style="background:var(--accent);color:white">Save</button>
+        </div>
+      </div>
+    </div>
   </main>
 `, `
     ${stationNamesJS(config)}
     var LABELS = ${JSON.stringify(config.entity_labels)};
     ${displayStatusJS(config)}
     ${STATUS_COLOR_JS}
+
+    var USER_ROLE = ${JSON.stringify(user.role)};
+    var ROLE_LEVELS = { user: 0, lead: 1, supervisor: 2, admin: 3 };
+    var editingCabId = null;
 
     var jobId = window.location.pathname.split('/').pop();
     var job = null;
@@ -974,10 +1033,20 @@ export function jobDetailPage(config: TenantConfig, user: SessionUser): string {
           job.buckets.map(function(b) { return '<option value="' + b.id + '">' + b.name + '</option>'; }).join('');
 
         var grid = document.getElementById('cab-grid');
+        var isLead = ROLE_LEVELS[USER_ROLE] >= ROLE_LEVELS['lead'];
         grid.innerHTML = job.cabinets.map(function(c) {
-          return '<div class="cab-tile ' + c.status + '">' + LABELS.l3 + ' ' + c.cabinet_number +
+          var hasMeta = c.accessories || c.notes || c.assembly_sheet_url;
+          return '<div class="cab-tile ' + c.status + (isLead ? ' clickable' : '') + '"' +
+            (isLead ? ' data-cab-id="' + c.id + '"' : '') + '>' +
+            LABELS.l3 + ' ' + c.cabinet_number +
+            (hasMeta ? '<span class="meta-dot" title="Has metadata"></span>' : '') +
             '<div class="sub">' + (c.label || displayStatus(c.status)) + '</div></div>';
         }).join('') || '<div style="color:var(--muted);font-size:0.8rem">No ' + LABELS.l3.toLowerCase() + 's yet</div>';
+        grid.querySelectorAll('.cab-tile[data-cab-id]').forEach(function(tile) {
+          tile.addEventListener('click', function() {
+            openCabModal(parseInt(tile.getAttribute('data-cab-id')));
+          });
+        });
 
         var log = document.getElementById('scan-log');
         log.innerHTML = job.scans.map(function(s) {
@@ -1039,6 +1108,57 @@ export function jobDetailPage(config: TenantConfig, user: SessionUser): string {
         }
       });
       Promise.all(promises).then(function() { load(); });
+    });
+
+    // --- Cabinet metadata modal ---
+    function escHtml(s) { return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
+
+    function openCabModal(cabId) {
+      var cab = job.cabinets.find(function(c) { return c.id === cabId; });
+      if (!cab) return;
+      editingCabId = cabId;
+      document.getElementById('cab-modal-title').textContent = LABELS.l3 + ' ' + cab.cabinet_number + (cab.label ? ' — ' + cab.label : '');
+      document.getElementById('meta-accessories').value = cab.accessories || '';
+      document.getElementById('meta-notes').value = cab.notes || '';
+      document.getElementById('meta-sheet-url').value = cab.assembly_sheet_url || '';
+      updateSheetPreview();
+      document.getElementById('cab-modal-overlay').style.display = 'flex';
+    }
+
+    function closeModal() {
+      document.getElementById('cab-modal-overlay').style.display = 'none';
+      editingCabId = null;
+    }
+
+    function updateSheetPreview() {
+      var url = (document.getElementById('meta-sheet-url').value || '').trim();
+      var el = document.getElementById('meta-sheet-preview');
+      el.innerHTML = url ? '<a class="sheet-link" href="' + escHtml(url) + '" target="_blank" rel="noopener">Open sheet ↗</a>' : '';
+    }
+
+    document.getElementById('meta-sheet-url').addEventListener('input', updateSheetPreview);
+    document.getElementById('cab-modal-overlay').addEventListener('click', function(e) {
+      if (e.target.id === 'cab-modal-overlay') closeModal();
+    });
+    document.getElementById('meta-cancel').addEventListener('click', closeModal);
+    document.getElementById('meta-save').addEventListener('click', function() {
+      if (!editingCabId) return;
+      var btn = document.getElementById('meta-save');
+      btn.disabled = true; btn.textContent = 'Saving...';
+      fetch('/api/cabinets/' + editingCabId + '/metadata', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accessories: document.getElementById('meta-accessories').value,
+          notes: document.getElementById('meta-notes').value,
+          assembly_sheet_url: document.getElementById('meta-sheet-url').value.trim()
+        })
+      }).then(function(r) { return r.json(); }).then(function(data) {
+        btn.disabled = false; btn.textContent = 'Save';
+        if (data.error) { alert(data.error); return; }
+        closeModal();
+        load();
+      });
     });
 
     load();
@@ -1256,6 +1376,18 @@ export function stationViewPage(config: TenantConfig, user: SessionUser): string
       border-radius: 10px; color: var(--accent); text-align: center; min-width: 140px;
     }
     .station-seq { font-size: 0.6rem; font-weight: 400; color: var(--muted); display: block; margin-top: 2px; }
+    .date-picker-row { display: flex; align-items: center; gap: 8px; }
+    .date-picker-row button {
+      padding: 6px 14px; font-size: 0.8rem; font-weight: 600; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--surface); color: var(--muted); cursor: pointer;
+    }
+    .date-picker-row button.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+    .date-picker-row input[type="date"] {
+      padding: 6px 10px; font-size: 0.8rem; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--surface); color: var(--text);
+      color-scheme: dark;
+    }
+    .date-label { font-size: 0.7rem; color: var(--warning); font-weight: 600; }
     .level-label { font-size: 0.6rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin: 8px 0 2px; }
     .item-card {
       background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
@@ -1274,6 +1406,45 @@ export function stationViewPage(config: TenantConfig, user: SessionUser): string
       opacity: 0; transition: opacity 0.2s; pointer-events: none; z-index: 100;
     }
     .swipe-toast.show { opacity: 1; }
+    .staging-job { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .staging-job-header { padding: 12px 14px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+    .staging-job-header:active { background: rgba(59,130,246,0.08); }
+    .staging-job-title { font-weight: 700; font-size: 1rem; }
+    .staging-job-sub { font-size: 0.8rem; color: var(--muted); margin-top: 2px; }
+    .staging-progress { display: flex; align-items: center; gap: 8px; }
+    .staging-progress-bar { width: 60px; height: 6px; background: var(--bg); border-radius: 3px; overflow: hidden; }
+    .staging-progress-fill { height: 100%; border-radius: 3px; background: var(--accent); transition: width 0.3s; }
+    .staging-progress-fill.full { background: var(--success); }
+    .staging-progress-text { font-size: 0.75rem; font-weight: 600; color: var(--muted); min-width: 36px; text-align: right; }
+    .staging-badge { font-size: 0.6rem; font-weight: 700; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; background: rgba(34,197,94,0.15); color: var(--success); }
+    .staging-cabs { border-top: 1px solid var(--border); display: none; }
+    .staging-cabs.open { display: block; }
+    .staging-cab { display: flex; justify-content: space-between; align-items: center; padding: 10px 14px; border-bottom: 1px solid var(--border); gap: 8px; }
+    .staging-cab:last-child { border-bottom: none; }
+    .staging-cab-info { flex: 1; min-width: 0; }
+    .staging-cab-label { font-weight: 600; font-size: 0.85rem; }
+    .staging-cab-bucket { font-size: 0.7rem; color: var(--muted); }
+    .staging-loc { flex-shrink: 0; max-width: 140px; }
+    .staging-loc-text { font-size: 0.8rem; color: var(--accent); cursor: pointer; padding: 4px 8px; border-radius: 6px; background: rgba(59,130,246,0.08); text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+    .staging-loc-empty { font-size: 0.8rem; color: var(--muted); cursor: pointer; font-style: italic; padding: 4px 8px; }
+    .staging-loc input {
+      width: 130px; padding: 6px 8px; font-size: 0.8rem; border-radius: 6px;
+      border: 1px solid var(--accent); background: var(--bg); color: var(--text);
+      outline: none;
+    }
+    .staging-toggle { display: flex; gap: 0; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
+    .staging-toggle button {
+      flex: 1; padding: 8px 16px; font-size: 0.8rem; font-weight: 600; border: none;
+      background: var(--surface); color: var(--muted); cursor: pointer; transition: all 0.2s;
+    }
+    .staging-toggle button.active { background: var(--accent); color: #fff; }
+    .staging-loc-group { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--accent); padding: 8px 0 4px; }
+    .staging-flat-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    }
+    .staging-flat-job { font-size: 0.7rem; color: var(--muted); }
+    .staging-flat-label { font-weight: 600; font-size: 0.85rem; }
 `, `
   <main>
     <div class="card">
@@ -1283,6 +1454,17 @@ export function stationViewPage(config: TenantConfig, user: SessionUser): string
         <div class="station-next" id="station-next"></div>
       </div>
     </div>
+    <div class="date-picker-row">
+      <button id="btn-live" class="active">Live</button>
+      <input type="date" id="date-pick" />
+      <span id="date-label" class="date-label" style="display:none"></span>
+    </div>
+    <div id="staging-controls" style="display:none">
+      <div class="staging-toggle">
+        <button id="btn-by-job" class="active">By Job</button>
+        <button id="btn-by-loc">By Location</button>
+      </div>
+    </div>
     <div id="item-count" style="font-size:0.8rem;color:var(--muted)"></div>
     <div id="items"></div>
     <div class="swipe-toast" id="swipe-toast"></div>
@@ -1290,6 +1472,7 @@ export function stationViewPage(config: TenantConfig, user: SessionUser): string
 `, `
     var STATIONS = ${JSON.stringify(config.stations)};
     var LABELS = ${JSON.stringify(config.entity_labels)};
+    var TERMINAL_STATUS = ${JSON.stringify(config.l3_terminal_status)};
 
     var selected = localStorage.getItem('stationView') || STATIONS[0].slug;
     var svPrev = document.getElementById('station-prev');
@@ -1297,6 +1480,47 @@ export function stationViewPage(config: TenantConfig, user: SessionUser): string
     var svNext = document.getElementById('station-next');
     var itemsDiv = document.getElementById('items');
     var countDiv = document.getElementById('item-count');
+
+    var viewDate = null;
+    var btnLive = document.getElementById('btn-live');
+    var datePick = document.getElementById('date-pick');
+    var dateLabel = document.getElementById('date-label');
+
+    btnLive.addEventListener('click', function() {
+      viewDate = null;
+      datePick.value = '';
+      btnLive.classList.add('active');
+      dateLabel.style.display = 'none';
+      load();
+    });
+    datePick.addEventListener('change', function() {
+      if (datePick.value) {
+        viewDate = datePick.value;
+        btnLive.classList.remove('active');
+        dateLabel.textContent = 'Viewing ' + viewDate;
+        dateLabel.style.display = '';
+      } else {
+        viewDate = null;
+        btnLive.classList.add('active');
+        dateLabel.style.display = 'none';
+      }
+      load();
+    });
+
+    var stagingMode = localStorage.getItem('stagingMode') || 'job';
+    var stagingControls = document.getElementById('staging-controls');
+    var btnByJob = document.getElementById('btn-by-job');
+    var btnByLoc = document.getElementById('btn-by-loc');
+    var lastStagingData = null;
+
+    btnByJob.addEventListener('click', function() { stagingMode = 'job'; localStorage.setItem('stagingMode', 'job'); btnByJob.classList.add('active'); btnByLoc.classList.remove('active'); if (lastStagingData) renderStagingView(lastStagingData); });
+    btnByLoc.addEventListener('click', function() { stagingMode = 'loc'; localStorage.setItem('stagingMode', 'loc'); btnByLoc.classList.add('active'); btnByJob.classList.remove('active'); if (lastStagingData) renderStagingView(lastStagingData); });
+    if (stagingMode === 'loc') { btnByLoc.classList.add('active'); btnByJob.classList.remove('active'); }
+
+    function isTerminal(slug) {
+      var s = STATIONS.find(function(st) { return st.slug === slug; });
+      return s && s.sets_status === TERMINAL_STATUS;
+    }
 
     function svIdx() {
       for (var i = 0; i < STATIONS.length; i++) { if (STATIONS[i].slug === selected) return i; }
@@ -1335,16 +1559,179 @@ export function stationViewPage(config: TenantConfig, user: SessionUser): string
       return LABELS.l3.toLowerCase() + 's';
     }
 
+    function saveLocation(cabId, value) {
+      fetch('/api/cabinets/' + cabId + '/location', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ location: value })
+      });
+    }
+
+    function renderStagingView(jobs) {
+      lastStagingData = jobs;
+      if (jobs.length === 0) {
+        countDiv.textContent = '0 jobs in staging';
+        itemsDiv.innerHTML = '<div class="empty-state">Nothing staged right now</div>';
+        return;
+      }
+      if (stagingMode === 'loc') {
+        renderByLocation(jobs);
+      } else {
+        renderByJob(jobs);
+      }
+      wireLocationEditing();
+    }
+
+    function renderByJob(jobs) {
+      countDiv.textContent = jobs.length + ' job' + (jobs.length !== 1 ? 's' : '') + ' in staging';
+      itemsDiv.innerHTML = jobs.map(function(job, ji) {
+        var pct = job.cabinet_count > 0 ? Math.round((job.staged_count / job.cabinet_count) * 100) : 0;
+        var isFull = job.staged_count >= job.cabinet_count;
+        var cabsHtml = job.cabinets.map(function(cab) {
+          var lbl = cab.label || (LABELS.l3 + ' ' + cab.cabinet_number);
+          var bucket = cab.bucket_name ? cab.bucket_name : '';
+          var locHtml = cab.staging_location
+            ? '<div class="staging-loc-text" data-cab="' + cab.id + '">' + cab.staging_location.replace(/</g,'&lt;') + '</div>'
+            : '<div class="staging-loc-empty" data-cab="' + cab.id + '">+ Location</div>';
+          return '<div class="staging-cab">' +
+            '<div class="staging-cab-info">' +
+              '<div class="staging-cab-label">' + lbl + '</div>' +
+              (bucket ? '<div class="staging-cab-bucket">' + bucket + '</div>' : '') +
+            '</div>' +
+            '<div class="staging-loc">' + locHtml + '</div>' +
+          '</div>';
+        }).join('');
+        return '<div class="staging-job" style="display:flex;flex-direction:column;gap:0">' +
+          '<div class="staging-job-header" data-job-idx="' + ji + '">' +
+            '<div>' +
+              '<div class="staging-job-title">' + job.job_number + '</div>' +
+              '<div class="staging-job-sub">' + job.job_name + '</div>' +
+            '</div>' +
+            '<div class="staging-progress">' +
+              (isFull ? '<span class="staging-badge">Fully Staged</span>' : '') +
+              '<div class="staging-progress-bar"><div class="staging-progress-fill' + (isFull ? ' full' : '') + '" style="width:' + pct + '%"></div></div>' +
+              '<span class="staging-progress-text">' + job.staged_count + '/' + job.cabinet_count + '</span>' +
+            '</div>' +
+          '</div>' +
+          '<div class="staging-cabs" data-cabs="' + ji + '">' + cabsHtml + '</div>' +
+        '</div>';
+      }).join('');
+
+      itemsDiv.querySelectorAll('.staging-job-header').forEach(function(hdr) {
+        hdr.addEventListener('click', function() {
+          var idx = hdr.getAttribute('data-job-idx');
+          var cabs = itemsDiv.querySelector('[data-cabs="' + idx + '"]');
+          cabs.classList.toggle('open');
+        });
+      });
+    }
+
+    function renderByLocation(jobs) {
+      var allCabs = [];
+      jobs.forEach(function(job) {
+        job.cabinets.forEach(function(cab) {
+          allCabs.push({ cab: cab, job_number: job.job_number, job_name: job.job_name, job_id: job.id });
+        });
+      });
+      allCabs.sort(function(a, b) {
+        var locA = (a.cab.staging_location || '').toLowerCase();
+        var locB = (b.cab.staging_location || '').toLowerCase();
+        if (!locA && !locB) return a.job_number.localeCompare(b.job_number) || a.cab.cabinet_number - b.cab.cabinet_number;
+        if (!locA) return 1;
+        if (!locB) return -1;
+        if (locA !== locB) return locA.localeCompare(locB);
+        return a.job_number.localeCompare(b.job_number) || a.cab.cabinet_number - b.cab.cabinet_number;
+      });
+
+      var totalWithLoc = allCabs.filter(function(c) { return c.cab.staging_location; }).length;
+      countDiv.textContent = allCabs.length + ' ' + LABELS.l3.toLowerCase() + 's — ' + totalWithLoc + ' with locations';
+
+      var html = '';
+      var currentLoc = null;
+      allCabs.forEach(function(item) {
+        var loc = item.cab.staging_location || null;
+        if (loc !== currentLoc) {
+          currentLoc = loc;
+          html += '<div class="staging-loc-group">' + (loc ? loc.replace(/</g,'&lt;') : 'No Location') + '</div>';
+        }
+        var lbl = item.cab.label || (LABELS.l3 + ' ' + item.cab.cabinet_number);
+        var locHtml = item.cab.staging_location
+          ? '<div class="staging-loc-text" data-cab="' + item.cab.id + '">' + item.cab.staging_location.replace(/</g,'&lt;') + '</div>'
+          : '<div class="staging-loc-empty" data-cab="' + item.cab.id + '">+ Location</div>';
+        var metaLine = '';
+        if (item.cab.accessories || item.cab.notes || item.cab.assembly_sheet_url) {
+          var parts = [];
+          if (item.cab.accessories) parts.push(item.cab.accessories.replace(/\n/g, ', ').replace(/</g,'&lt;'));
+          if (item.cab.notes) parts.push(item.cab.notes.replace(/\n/g, ', ').replace(/</g,'&lt;'));
+          if (item.cab.assembly_sheet_url) parts.push('<a href="' + item.cab.assembly_sheet_url.replace(/"/g,'&quot;') + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:0.7rem">Sheet ↗</a>');
+          metaLine = '<div style="font-size:0.7rem;color:var(--muted);margin-top:2px">' + parts.join(' · ') + '</div>';
+        }
+        html += '<div class="staging-flat-card">' +
+          '<div>' +
+            '<div class="staging-flat-label">' + lbl + '</div>' +
+            '<div class="staging-flat-job">' + item.job_number + ' ' + item.job_name + (item.cab.bucket_name ? ' / ' + item.cab.bucket_name : '') + '</div>' +
+            metaLine +
+          '</div>' +
+          '<div class="staging-loc">' + locHtml + '</div>' +
+        '</div>';
+      });
+      itemsDiv.innerHTML = html;
+    }
+
+    function wireLocationEditing() {
+      itemsDiv.addEventListener('click', function(e) {
+        var tgt = e.target;
+        if (!tgt.classList.contains('staging-loc-text') && !tgt.classList.contains('staging-loc-empty')) return;
+        var cabId = tgt.getAttribute('data-cab');
+        var current = tgt.classList.contains('staging-loc-text') ? tgt.textContent : '';
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.value = current;
+        input.placeholder = 'e.g. Bay 3 left';
+        var parent = tgt.parentNode;
+        parent.replaceChild(input, tgt);
+        input.focus();
+        input.select();
+        function commit() {
+          var val = input.value.trim();
+          saveLocation(cabId, val);
+          var newEl = document.createElement('div');
+          if (val) {
+            newEl.className = 'staging-loc-text';
+            newEl.textContent = val;
+          } else {
+            newEl.className = 'staging-loc-empty';
+            newEl.textContent = '+ Location';
+          }
+          newEl.setAttribute('data-cab', cabId);
+          parent.replaceChild(newEl, input);
+        }
+        input.addEventListener('blur', commit);
+        input.addEventListener('keydown', function(ev) { if (ev.key === 'Enter') input.blur(); });
+      });
+    }
+
     function load() {
-      fetch('/api/stations/' + selected + '/items')
+      var qs = viewDate ? '?date=' + viewDate : '';
+      if (isTerminal(selected)) {
+        stagingControls.style.display = '';
+        fetch('/api/stations/' + selected + '/staging' + qs)
+          .then(function(r) { return r.json(); })
+          .then(function(data) { renderStagingView(data.jobs || []); });
+        return;
+      }
+      stagingControls.style.display = 'none';
+      lastStagingData = null;
+      fetch('/api/stations/' + selected + '/items' + qs)
         .then(function(r) { return r.json(); })
         .then(function(data) {
           var items = data.items || [];
           var level = data.level;
-          countDiv.textContent = items.length + ' ' + levelLabel(level) + ' at this station';
+          var suffix = viewDate ? ' on ' + viewDate : ' at this station';
+          countDiv.textContent = items.length + ' ' + levelLabel(level) + suffix;
 
           if (items.length === 0) {
-            itemsDiv.innerHTML = '<div class="empty-state">Nothing here right now</div>';
+            itemsDiv.innerHTML = '<div class="empty-state">' + (viewDate ? 'No activity on ' + viewDate : 'Nothing here right now') + '</div>';
             return;
           }
 
@@ -1374,13 +1761,21 @@ export function stationViewPage(config: TenantConfig, user: SessionUser): string
             itemsDiv.innerHTML = items.map(function(cab) {
               var lbl = cab.label || (LABELS.l3 + ' ' + cab.cabinet_number);
               var bucket = cab.bucket_name ? ' / ' + cab.bucket_name : '';
+              var meta = '';
+              if (cab.accessories || cab.notes || cab.assembly_sheet_url) {
+                meta = '<div style="padding:4px 14px 10px;font-size:0.75rem;color:var(--muted)">';
+                if (cab.accessories) meta += '<div><strong>Accessories:</strong> ' + cab.accessories.replace(/\n/g, ', ').replace(/</g,'&lt;') + '</div>';
+                if (cab.notes) meta += '<div><strong>Notes:</strong> ' + cab.notes.replace(/\n/g, ', ').replace(/</g,'&lt;') + '</div>';
+                if (cab.assembly_sheet_url) meta += '<div><a href="' + cab.assembly_sheet_url.replace(/"/g,'&quot;') + '" target="_blank" rel="noopener" style="color:var(--accent)">Assembly Sheet ↗</a></div>';
+                meta += '</div>';
+              }
               return '<div class="item-card"><div>' +
                 '<div class="primary">' + lbl + '</div>' +
                 '<div class="secondary">' + cab.job_number + ' ' + cab.job_name + bucket + '</div>' +
                 '</div><div class="right">' +
                 '<div>' + timeAgo(new Date(cab.scanned_at + 'Z')) + '</div>' +
                 '<a href="/job/' + cab.job_id + '">Details</a>' +
-                '</div></div>';
+                '</div></div>' + meta;
             }).join('');
           }
         });
@@ -1435,7 +1830,7 @@ export function stationViewPage(config: TenantConfig, user: SessionUser): string
 
       if (absDx > absDy) {
         cycleStation(dx < 0 ? 1 : -1);
-      } else if (dy > 50) {
+      } else if (dy > 50 && window.scrollY < 10) {
         load();
         showToast('Refreshed');
       }
