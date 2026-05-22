@@ -696,17 +696,66 @@ app.get("/api/kpi/assemblers", requireAuth("lead"), async (c) => {
     timerByAssembler[row.assembler] = { avg_working_minutes: row.avg_working_minutes, avg_paused_minutes: row.avg_paused_minutes, source: "timer" };
   }
 
+  const pauseDaily = await c.env.DB.prepare(
+    `SELECT
+       u.name AS assembler,
+       DATE(bs.started_at) AS day,
+       ROUND(AVG(bs.total_paused_seconds / 60.0), 1) AS avg_pause_min
+     FROM build_sessions bs
+     JOIN users u ON bs.user_id = u.id
+     WHERE bs.completed_at IS NOT NULL
+       AND bs.started_at >= datetime('now', '-' || ? || ' days')
+     GROUP BY bs.user_id, DATE(bs.started_at)
+     ORDER BY day ASC`
+  ).bind(days).all();
+
+  const pauseDailyByAssembler: Record<string, Array<{ day: string; avg_pause_min: number }>> = {};
+  for (const row of pauseDaily.results as Array<{ assembler: string; day: string; avg_pause_min: number }>) {
+    if (!pauseDailyByAssembler[row.assembler]) pauseDailyByAssembler[row.assembler] = [];
+    pauseDailyByAssembler[row.assembler].push({ day: row.day, avg_pause_min: row.avg_pause_min });
+  }
+
+  const fixitData = await c.env.DB.prepare(
+    `SELECT
+       u.name AS assembler,
+       COUNT(*) AS total_fixits,
+       COUNT(CASE WHEN f.root_cause = 'cnc_error' THEN 1 END) AS cnc_error,
+       COUNT(CASE WHEN f.root_cause = 'material_defect' THEN 1 END) AS material_defect,
+       COUNT(CASE WHEN f.root_cause = 'transit_damage' THEN 1 END) AS transit_damage,
+       COUNT(CASE WHEN f.root_cause = 'other' THEN 1 END) AS other_cause
+     FROM fixit_requests f
+     JOIN users u ON f.requested_by = u.id
+     WHERE f.created_at >= datetime('now', '-' || ? || ' days')
+     GROUP BY f.requested_by`
+  ).bind(days).all();
+
+  const fixitByAssembler: Record<string, { total_fixits: number; cnc_error: number; material_defect: number; transit_damage: number; other_cause: number }> = {};
+  for (const row of fixitData.results as Array<{ assembler: string; total_fixits: number; cnc_error: number; material_defect: number; transit_damage: number; other_cause: number }>) {
+    fixitByAssembler[row.assembler] = { total_fixits: row.total_fixits, cnc_error: row.cnc_error, material_defect: row.material_defect, transit_damage: row.transit_damage, other_cause: row.other_cause };
+  }
+
   const assemblers = (result.results as Array<Record<string, unknown>>).map((a) => {
     const timer = timerByAssembler[a.assembler as string];
-    return { ...a, ...(timer || { source: "estimated" }) };
+    const fixit = fixitByAssembler[a.assembler as string];
+    const completed = (a.total_completed as number) || 0;
+    const fixitCount = fixit?.total_fixits || 0;
+    const fixitRate = completed > 0 ? Math.round((fixitCount / completed) * 1000) / 10 : 0;
+    return { ...a, ...(timer || { source: "estimated" }), fixit_count: fixitCount, fixit_rate: fixitRate, fixit_breakdown: fixit || null };
   });
+
+  const totalFixits = assemblers.reduce((s, a) => s + ((a as Record<string, unknown>).fixit_count as number), 0);
+  const totalCompleted = assemblers.reduce((s, a) => s + ((a as Record<string, unknown>).total_completed as number || 0), 0);
+  const teamFixitRate = totalCompleted > 0 ? Math.round((totalFixits / totalCompleted) * 1000) / 10 : 0;
 
   return c.json({
     assemblers,
     daily: dailyByAssembler,
+    pause_daily: pauseDailyByAssembler,
     start_station: config.stations.find((s) => s.slug === startStation)?.name,
     end_station: config.stations.find((s) => s.slug === endStation)?.name,
     days,
+    team_fixits: totalFixits,
+    team_fixit_rate: teamFixitRate,
   });
 });
 

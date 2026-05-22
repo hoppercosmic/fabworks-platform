@@ -2059,11 +2059,11 @@ export function progressPage(config: TenantConfig, user: SessionUser): string {
 // ─── KPI DASHBOARD ──────────────────────────────────────
 export function kpiPage(config: TenantConfig, user: SessionUser): string {
   return page("Assembler KPI", `
-    main { flex: 1; padding: 16px; max-width: 900px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+    main { flex: 1; padding: 16px; max-width: 1100px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
     .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
     .controls select { width: auto; padding: 8px 12px; font-size: 0.85rem; }
     .controls .label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
-    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 14px; }
+    .kpi-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
     .kpi-card {
       background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
       padding: 16px; display: flex; flex-direction: column; gap: 12px;
@@ -2081,12 +2081,14 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
     .kpi-stat .val.success { color: var(--success); }
     .kpi-stat .val.warning { color: var(--warning); }
     .kpi-stat .val.purple { color: var(--purple); }
+    .kpi-stat .val.error { color: var(--error); }
     .kpi-bar-row { display: flex; align-items: center; gap: 6px; font-size: 0.7rem; color: var(--muted); }
     .kpi-bar-row .day-label { width: 40px; text-align: right; flex-shrink: 0; }
     .kpi-bar-track { flex: 1; height: 14px; background: var(--bg); border-radius: 3px; overflow: hidden; }
     .kpi-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
     .kpi-bar-fill.blue { background: var(--accent); }
     .kpi-bar-row .count { width: 20px; font-weight: 600; }
+    .kpi-bar-row .pause-tag { width: 32px; font-size: 0.6rem; color: var(--warning); text-align: right; flex-shrink: 0; }
     .kpi-timing { font-size: 0.75rem; color: var(--muted); display: flex; justify-content: space-between; }
     .kpi-timing .fast { color: var(--success); }
     .kpi-timing .slow { color: var(--warning); }
@@ -2099,6 +2101,44 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
     .summary-stat .lbl { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; }
     .empty-state { text-align: center; padding: 48px 16px; color: var(--muted); }
     .station-info { font-size: 0.75rem; color: var(--muted); }
+    .cause-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; margin-top: 4px; }
+    .cause-bar span { height: 100%; }
+    .cause-bar .cnc { background: var(--accent); }
+    .cause-bar .material { background: var(--warning); }
+    .cause-bar .transit { background: var(--purple); }
+    .cause-bar .other-cause { background: var(--muted); }
+    .cause-legend { display: flex; gap: 8px; flex-wrap: wrap; font-size: 0.6rem; color: var(--muted); margin-top: 4px; }
+    .cause-legend span::before { content: ''; display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 3px; vertical-align: middle; }
+    .cause-legend .cnc::before { background: var(--accent); }
+    .cause-legend .material::before { background: var(--warning); }
+    .cause-legend .transit::before { background: var(--purple); }
+    .cause-legend .other-cause::before { background: var(--muted); }
+
+    @media (max-width: 400px) {
+      main { padding: 10px; gap: 10px; }
+      .kpi-grid { grid-template-columns: 1fr; gap: 10px; }
+      .kpi-stats { grid-template-columns: 1fr 1fr; gap: 6px; }
+      .kpi-stat .val { font-size: 1.2rem; }
+      .kpi-stat .lbl { font-size: 0.6rem; }
+      .kpi-card { padding: 12px; gap: 10px; }
+      .kpi-card .name { font-size: 1rem; }
+      .summary-bar { gap: 12px; padding: 10px 12px; justify-content: center; }
+      .summary-stat .val { font-size: 1.2rem; }
+      .summary-stat .lbl { font-size: 0.6rem; }
+      .cause-legend { display: none; }
+      .kpi-bar-row .pause-tag { display: none; }
+      .kpi-timing { font-size: 0.7rem; }
+    }
+
+    @media (min-width: 401px) and (max-width: 768px) {
+      .summary-bar { gap: 16px; justify-content: center; }
+      .kpi-grid { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+    }
+
+    @media (min-width: 769px) {
+      .summary-bar { justify-content: space-between; }
+      .kpi-stats { grid-template-columns: 1fr 1fr 1fr; }
+    }
   `, `
   <main>
     <div class="controls">
@@ -2133,6 +2173,7 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
 
     function load() {
       var days = daysSelect.value;
+      var taktPromise = fetch('/api/kpi/takt?days=' + days).then(function(r) { return r.json(); }).catch(function() { return null; });
       fetch('/api/kpi/assemblers?days=' + days)
         .then(function(r) { return r.json(); })
         .then(function(data) {
@@ -2161,37 +2202,94 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
           });
           var teamAvg = allAvg.length > 0 ? Math.round(allAvg.reduce(function(s,v){return s+v;},0) / allAvg.length * 10) / 10 : null;
 
-          summaryDiv.style.display = 'flex';
-          summaryDiv.innerHTML =
-            '<div class="summary-stat"><div class="val">' + totalCompleted + '</div><div class="lbl">' + LABELS.l3 + 's Completed</div></div>' +
-            '<div class="summary-stat"><div class="val">' + assemblers.length + '</div><div class="lbl">Assemblers</div></div>' +
-            '<div class="summary-stat"><div class="val">' + fmtMin(teamAvg) + '</div><div class="lbl">Team Avg Cycle</div></div>' +
-            '<div class="summary-stat"><div class="val">' + days + 'd</div><div class="lbl">Time Range</div></div>';
+          var teamFixits = data.team_fixits || 0;
+          var teamFixitRate = data.team_fixit_rate || 0;
+          var fixitColor = teamFixitRate > 5 ? 'warning' : 'success';
+
+          taktPromise.then(function(taktData) {
+            var taktStat = '';
+            if (taktData && taktData.stations && taktData.stations.length > 0) {
+              var l3Stations = taktData.stations.filter(function(s) { return s.level === 'l3'; });
+              if (l3Stations.length > 0) {
+                var totalDwell = 0; var totalCount = 0;
+                l3Stations.forEach(function(s) { totalDwell += s.avg_minutes * s.count; totalCount += s.count; });
+                var avgTakt = totalCount > 0 ? Math.round(totalDwell / totalCount * 10) / 10 : null;
+                if (avgTakt != null) taktStat = '<div class="summary-stat"><div class="val purple">' + fmtMin(avgTakt) + '</div><div class="lbl">Avg Takt</div></div>';
+              }
+            }
+
+            summaryDiv.style.display = 'flex';
+            summaryDiv.innerHTML =
+              '<div class="summary-stat"><div class="val">' + totalCompleted + '</div><div class="lbl">' + LABELS.l3 + 's Completed</div></div>' +
+              '<div class="summary-stat"><div class="val">' + assemblers.length + '</div><div class="lbl">Assemblers</div></div>' +
+              '<div class="summary-stat"><div class="val">' + fmtMin(teamAvg) + '</div><div class="lbl">Team Avg Cycle</div></div>' +
+              taktStat +
+              '<div class="summary-stat"><div class="val ' + fixitColor + '">' + teamFixitRate + '%</div><div class="lbl">Defect Rate</div></div>' +
+              '<div class="summary-stat"><div class="val">' + teamFixits + '</div><div class="lbl">FixIts</div></div>' +
+              '<div class="summary-stat"><div class="val">' + days + 'd</div><div class="lbl">Time Range</div></div>';
+          });
 
           var maxDaily = 1;
           Object.keys(daily).forEach(function(name) {
             daily[name].forEach(function(d) { if (d.completed > maxDaily) maxDaily = d.completed; });
           });
 
+          var pauseDaily = data.pause_daily || {};
+
           gridDiv.innerHTML = assemblers.map(function(a, idx) {
             var days7 = (daily[a.assembler] || []).slice(-7);
+            var pauseDays = pauseDaily[a.assembler] || [];
+            var pauseByDay = {};
+            pauseDays.forEach(function(p) { pauseByDay[p.day] = p.avg_pause_min; });
 
             var barsHtml = days7.map(function(d) {
               var pct = Math.round((d.completed / maxDaily) * 100);
               var dayLabel = d.day.slice(5);
+              var pauseLabel = pauseByDay[d.day] != null ? '<span class="pause-tag">' + pauseByDay[d.day] + 'm</span>' : '';
               return '<div class="kpi-bar-row">' +
                 '<span class="day-label">' + dayLabel + '</span>' +
                 '<div class="kpi-bar-track"><div class="kpi-bar-fill blue" style="width:' + pct + '%"></div></div>' +
-                '<span class="count">' + d.completed + '</span></div>';
+                '<span class="count">' + d.completed + '</span>' + pauseLabel + '</div>';
             }).join('');
 
             var src = a.source || 'estimated';
             var badge = '<span class="source-badge ' + src + '">' + src + '</span>';
             var cycleLabel = src === 'timer' ? 'Avg Work' : 'Avg Cycle';
             var cycleVal = src === 'timer' && a.avg_working_minutes != null ? a.avg_working_minutes : a.avg_minutes;
+            var effPct = null;
+            if (src === 'timer' && a.avg_working_minutes != null && a.avg_paused_minutes != null) {
+              var total = a.avg_working_minutes + a.avg_paused_minutes;
+              effPct = total > 0 ? Math.round((a.avg_working_minutes / total) * 100) : null;
+            }
+            var effClass = effPct == null ? '' : effPct >= 85 ? 'success' : effPct >= 70 ? 'warning' : 'error';
+            var effRow = effPct != null
+              ? '<div class="kpi-stat"><div class="val ' + effClass + '">' + effPct + '%</div><div class="lbl">Efficiency</div></div>'
+              : '';
             var pauseRow = src === 'timer' && a.avg_paused_minutes != null
               ? '<div class="kpi-stat"><div class="val warning">' + fmtMin(a.avg_paused_minutes) + '</div><div class="lbl">Avg Paused</div></div>'
               : '';
+
+            var fixitRate = a.fixit_rate || 0;
+            var fixitCount = a.fixit_count || 0;
+            var fixitClass = fixitRate > 5 ? 'warning' : fixitRate > 0 ? '' : 'success';
+            var fixitStat = '<div class="kpi-stat"><div class="val ' + fixitClass + '">' + fixitRate + '%</div><div class="lbl">Defect Rate (' + fixitCount + ')</div></div>';
+
+            var causeBar = '';
+            if (a.fixit_breakdown && fixitCount > 0) {
+              var b = a.fixit_breakdown;
+              var causeBarInner =
+                (b.cnc_error > 0 ? '<span class="cnc" style="width:' + (b.cnc_error / fixitCount * 100) + '%"></span>' : '') +
+                (b.material_defect > 0 ? '<span class="material" style="width:' + (b.material_defect / fixitCount * 100) + '%"></span>' : '') +
+                (b.transit_damage > 0 ? '<span class="transit" style="width:' + (b.transit_damage / fixitCount * 100) + '%"></span>' : '') +
+                (b.other_cause > 0 ? '<span class="other-cause" style="width:' + (b.other_cause / fixitCount * 100) + '%"></span>' : '');
+              causeBar = '<div class="cause-bar">' + causeBarInner + '</div>' +
+                '<div class="cause-legend">' +
+                  (b.cnc_error > 0 ? '<span class="cnc">CNC ' + b.cnc_error + '</span>' : '') +
+                  (b.material_defect > 0 ? '<span class="material">Material ' + b.material_defect + '</span>' : '') +
+                  (b.transit_damage > 0 ? '<span class="transit">Transit ' + b.transit_damage + '</span>' : '') +
+                  (b.other_cause > 0 ? '<span class="other-cause">Other ' + b.other_cause + '</span>' : '') +
+                '</div>';
+            }
 
             return '<div class="kpi-card">' +
               '<div><span class="name">' + a.assembler + '</span> <span class="rank">#' + (idx + 1) + '</span>' + badge + '</div>' +
@@ -2199,8 +2297,11 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
                 '<div class="kpi-stat"><div class="val success">' + a.total_completed + '</div><div class="lbl">Completed</div></div>' +
                 '<div class="kpi-stat"><div class="val accent">' + a.per_day + '</div><div class="lbl">Per Day</div></div>' +
                 '<div class="kpi-stat"><div class="val purple">' + fmtMin(cycleVal) + '</div><div class="lbl">' + cycleLabel + '</div></div>' +
+                (effRow || '') +
                 (pauseRow || '<div class="kpi-stat"><div class="val">' + a.active_days + '</div><div class="lbl">Active Days</div></div>') +
+                fixitStat +
               '</div>' +
+              causeBar +
               '<div class="kpi-timing">' +
                 '<span class="fast">Best: ' + fmtMin(a.min_minutes) + '</span>' +
                 '<span class="slow">Slowest: ' + fmtMin(a.max_minutes) + '</span>' +
