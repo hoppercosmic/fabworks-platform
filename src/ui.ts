@@ -17,7 +17,8 @@ const ROLE_LEVELS: Record<UserRole, number> = { user: 0, lead: 1, supervisor: 2,
 
 type NavItem = { path: string; label: string; icon: string; minRole: UserRole };
 const NAV_ITEMS: NavItem[] = [
-  { path: "/",           label: "Scan",      icon: SVG_SCAN,  minRole: "user" },
+  { path: "/",           label: "Home",      icon: IC('<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>'), minRole: "user" },
+  { path: "/scan",       label: "Scan",      icon: SVG_SCAN,  minRole: "user" },
   { path: "/workbench",  label: "Build",     icon: SVG_WRENCH, minRole: "user" },
   { path: "/jobs/new",   label: "New Job",   icon: SVG_PLUS,  minRole: "user" },
   { path: "/dashboard",  label: "Dash",      icon: SVG_CHART, minRole: "user" },
@@ -190,6 +191,19 @@ const USER_MENU_JS = `
         e.preventDefault();
         fetch('/api/auth/logout', { method: 'POST' }).then(function() { window.location.href = '/login'; });
       });
+      var _setHome = document.getElementById('set-home-link');
+      if (_setHome) {
+        var _pathMap = { '/scan': 'scan', '/': 'scan', '/workbench': 'workbench', '/fixit': 'fixit', '/stations': 'staging', '/dashboard': 'dashboard' };
+        var _homePage = _pathMap[window.location.pathname];
+        if (!_homePage) _setHome.style.display = 'none';
+        _setHome.addEventListener('click', function(e) {
+          e.preventDefault();
+          if (!_homePage) return;
+          fetch('/api/auth/home', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ home_page: _homePage }) })
+            .then(function(r) { return r.json(); })
+            .then(function(d) { if (d.ok) { _setHome.textContent = 'Home set ✓'; setTimeout(function() { _setHome.textContent = 'Set as Home'; _userDrop.classList.remove('open'); }, 1200); } });
+        });
+      }
     }
 `;
 
@@ -203,6 +217,7 @@ function page(title: string, extraStyles: string, body: string, script: string, 
       <button class="user-avatar" id="user-avatar-btn">${user.name.charAt(0).toUpperCase()}</button>
       <div class="user-dropdown" id="user-dropdown">
         <div class="ud-info"><div class="ud-name">${user.name}</div><div class="ud-role">${user.role}</div></div>
+        <a href="#" id="set-home-link">Set as Home</a>
         <a href="#" id="logout-link">Log out</a>
       </div>
     </div>
@@ -807,7 +822,7 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
         b.style.display = 'block';
       }
     });
-`, user, "/", ["https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"]);
+`, user, "/scan", ["https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"]);
 }
 
 // ─── NEW JOB PAGE ────────────────────────────────────────
@@ -2537,6 +2552,16 @@ export function adminPage(config: TenantConfig, user: SessionUser): string {
           </select>
         </div>
         <div class="field">
+          <label>Home Screen</label>
+          <select id="edit-home">
+            <option value="scan">Scan</option>
+            <option value="workbench">My Workbench</option>
+            <option value="fixit">FixIt Queue</option>
+            <option value="staging">Staging</option>
+            <option value="dashboard">Dashboard</option>
+          </select>
+        </div>
+        <div class="field">
           <label style="display:flex;align-items:center;gap:6px;text-transform:none;font-size:0.85rem">
             <input type="checkbox" id="edit-active" checked> Active
           </label>
@@ -2568,7 +2593,7 @@ export function adminPage(config: TenantConfig, user: SessionUser): string {
         var list = document.getElementById('user-list');
         list.innerHTML = users.map(function(u) {
           var cls = u.active ? '' : ' inactive';
-          return '<div class="user-row' + cls + '" data-uid="' + u.id + '" data-name="' + esc(u.name) + '" data-email="' + esc(u.email) + '" data-role="' + u.role + '" data-active="' + u.active + '">' +
+          return '<div class="user-row' + cls + '" data-uid="' + u.id + '" data-name="' + esc(u.name) + '" data-email="' + esc(u.email) + '" data-role="' + u.role + '" data-home="' + (u.home_page || 'scan') + '" data-active="' + u.active + '">' +
             '<div>' +
               '<div class="name">' + esc(u.name) + (!u.active ? ' <span style="color:var(--error);font-size:0.7rem">(disabled)</span>' : '') + '</div>' +
               '<div class="email">' + esc(u.email) + '</div>' +
@@ -2588,6 +2613,7 @@ export function adminPage(config: TenantConfig, user: SessionUser): string {
             document.getElementById('edit-email').value = row.dataset.email;
             document.getElementById('edit-pin').value = '';
             document.getElementById('edit-role').value = row.dataset.role;
+            document.getElementById('edit-home').value = row.dataset.home || 'scan';
             document.getElementById('edit-active').checked = row.dataset.active === '1';
             document.getElementById('edit-msg').className = 'msg';
             document.getElementById('edit-overlay').classList.add('open');
@@ -2618,6 +2644,7 @@ export function adminPage(config: TenantConfig, user: SessionUser): string {
       if (email) body.email = email;
       if (pin) body.pin = pin;
       body.role = role;
+      body.home_page = document.getElementById('edit-home').value;
       body.active = active;
 
       var msgDiv = document.getElementById('edit-msg');
@@ -3044,6 +3071,181 @@ export function workbenchPage(config: TenantConfig, user: SessionUser): string {
         });
     });
   `, user, "/workbench");
+}
+
+// ─── My Workbench (Assembler Home) ───────────────────────
+
+export function myWorkbenchPage(config: TenantConfig, user: SessionUser): string {
+  const L3 = config.entity_labels.l3;
+  return page("My Workbench", `
+    main { flex: 1; padding: 16px; max-width: 480px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+    .greeting { font-size: 1.3rem; font-weight: 700; }
+    .today-stat { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--muted); }
+    .today-stat .count { font-size: 1.4rem; font-weight: 700; color: var(--success); }
+    .active-build { border-left: 3px solid var(--accent); cursor: pointer; }
+    .active-build .ab-timer { font-family: 'SF Mono','Cascadia Code','Consolas',monospace; font-size: 1.8rem; font-weight: 700; color: #fff; }
+    .active-build .ab-timer.paused { color: var(--warning, #f59e0b); }
+    .active-build .ab-status { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+    .active-build .ab-cab { font-size: 0.9rem; color: var(--accent); margin-top: 0.25rem; }
+    .section-title { font-size: 0.75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .avail-list { display: flex; flex-direction: column; gap: 8px; }
+    .avail-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 12px; display: flex; justify-content: space-between; align-items: center; cursor: pointer;
+      transition: border-color 0.15s;
+    }
+    .avail-card:active { transform: scale(0.98); }
+    .avail-card .ac-main { display: flex; flex-direction: column; gap: 2px; }
+    .avail-card .ac-cab { font-weight: 700; font-size: 0.95rem; }
+    .avail-card .ac-job { font-size: 0.8rem; color: var(--muted); }
+    .avail-card .ac-meta { font-size: 0.7rem; color: var(--muted); }
+    .avail-card .start-arrow { color: var(--accent); font-size: 1.2rem; font-weight: 700; }
+    .recent-list { display: flex; flex-direction: column; gap: 6px; }
+    .recent-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+    .recent-row .rr-cab { font-weight: 600; }
+    .recent-row .rr-time { color: var(--success); font-weight: 600; }
+    .recent-row .rr-ago { color: var(--muted); font-size: 0.75rem; }
+    .empty-msg { text-align: center; padding: 2rem 1rem; color: var(--muted); font-size: 0.9rem; }
+    .home-picker { margin-top: 0.5rem; }
+    .home-picker select { width: auto; padding: 6px 10px; font-size: 0.8rem; }
+    .home-picker .label { font-size: 0.7rem; color: var(--muted); }
+  `, `
+  <main>
+    <div class="greeting">Hey, ${user.name.split(" ")[0]}</div>
+    <div class="today-stat"><span class="count" id="today-count">—</span> ${L3}s completed today</div>
+
+    <div id="active-section" style="display:none">
+      <div class="section-title">Active Build</div>
+      <div class="card active-build" id="active-build" onclick="window.location.href='/workbench'">
+        <div class="ab-timer" id="ab-timer">00:00:00</div>
+        <div class="ab-status" id="ab-status">Working</div>
+        <div class="ab-cab" id="ab-cab"></div>
+      </div>
+    </div>
+
+    <div id="avail-section">
+      <div class="section-title">Ready to Build</div>
+      <div class="avail-list" id="avail-list"></div>
+      <div id="avail-empty" class="empty-msg" style="display:none">No ${L3.toLowerCase()}s waiting for assembly</div>
+    </div>
+
+    <div id="recent-section" style="display:none">
+      <div class="section-title">Recent Builds</div>
+      <div class="recent-list" id="recent-list"></div>
+    </div>
+
+    <div class="home-picker">
+      <span class="label">Home screen</span>
+      <select id="home-select">
+        <option value="scan">Scan</option>
+        <option value="workbench" selected>My Workbench</option>
+        <option value="fixit">FixIt Queue</option>
+        <option value="staging">Staging</option>
+        <option value="dashboard">Dashboard</option>
+      </select>
+    </div>
+  </main>
+  `, `
+    function escHtml(s) { return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
+    function fmtTime(totalSec) {
+      if (totalSec < 0) totalSec = 0;
+      var h = Math.floor(totalSec / 3600);
+      var m = Math.floor((totalSec % 3600) / 60);
+      var s = Math.floor(totalSec % 60);
+      return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+    }
+    function fmtMin(m) {
+      if (m == null) return '—';
+      if (m < 60) return m + 'm';
+      var h = Math.floor(m / 60);
+      var rm = Math.round(m % 60);
+      return h + 'h ' + rm + 'm';
+    }
+    function timeAgo(dateStr) {
+      var ms = Date.now() - new Date(dateStr + 'Z').getTime();
+      var min = Math.floor(ms / 60000);
+      if (min < 60) return min + 'm ago';
+      var hr = Math.floor(min / 60);
+      if (hr < 24) return hr + 'h ago';
+      return Math.floor(hr / 24) + 'd ago';
+    }
+
+    var abTimerEl = document.getElementById('ab-timer');
+    var abInterval = null;
+
+    function startAbTimer(session) {
+      var startMs = new Date(session.started_at + 'Z').getTime();
+      var pausedMs = (session.total_paused_seconds || 0) * 1000;
+      var isPaused = !!session.paused_at;
+      var pausedAtMs = isPaused ? new Date(session.paused_at + 'Z').getTime() : 0;
+
+      function tick() {
+        var elapsed = (Date.now() - startMs) / 1000 - pausedMs / 1000;
+        if (isPaused) elapsed -= (Date.now() - pausedAtMs) / 1000;
+        abTimerEl.textContent = fmtTime(elapsed);
+      }
+      tick();
+      if (abInterval) clearInterval(abInterval);
+      abInterval = setInterval(tick, 1000);
+
+      if (isPaused) {
+        abTimerEl.classList.add('paused');
+        document.getElementById('ab-status').textContent = 'Paused';
+      }
+    }
+
+    fetch('/api/my/workbench')
+      .then(function(r) { return r.json(); })
+      .then(function(data) {
+        document.getElementById('today-count').textContent = data.today_completed;
+
+        if (data.active_session) {
+          document.getElementById('active-section').style.display = 'block';
+          var s = data.active_session;
+          document.getElementById('ab-cab').textContent = '${L3} #' + s.cabinet_number + (s.label ? ' — ' + escHtml(s.label) : '') + ' · ' + s.job_number;
+          startAbTimer(s);
+        }
+
+        var list = document.getElementById('avail-list');
+        if (data.available.length === 0) {
+          document.getElementById('avail-empty').style.display = 'block';
+        } else {
+          list.innerHTML = data.available.map(function(c) {
+            var meta = [];
+            if (c.bucket_name) meta.push(c.bucket_name);
+            if (c.accessories) meta.push('Has accessories');
+            return '<div class="avail-card" onclick="window.location.href=\\'/scan\\'">'
+              + '<div class="ac-main">'
+              +   '<div class="ac-cab">${L3} #' + c.cabinet_number + (c.label ? ' — ' + escHtml(c.label) : '') + '</div>'
+              +   '<div class="ac-job">' + c.job_number + ' — ' + escHtml(c.job_name) + '</div>'
+              +   (meta.length ? '<div class="ac-meta">' + meta.join(' · ') + '</div>' : '')
+              + '</div>'
+              + '<span class="start-arrow">→</span>'
+              + '</div>';
+          }).join('');
+        }
+
+        if (data.recent.length > 0) {
+          document.getElementById('recent-section').style.display = 'block';
+          document.getElementById('recent-list').innerHTML = data.recent.map(function(r) {
+            return '<div class="recent-row">'
+              + '<div><span class="rr-cab">${L3} #' + r.cabinet_number + '</span> · ' + r.job_number + '</div>'
+              + '<div><span class="rr-time">' + fmtMin(r.working_minutes) + '</span> <span class="rr-ago">' + timeAgo(r.completed_at) + '</span></div>'
+              + '</div>';
+          }).join('');
+        }
+      });
+
+    document.getElementById('home-select').addEventListener('change', function(e) {
+      fetch('/api/auth/home', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ home_page: e.target.value }),
+      }).then(function() {
+        if (e.target.value !== 'workbench') window.location.href = '/';
+      });
+    });
+  `, user, "/");
 }
 
 // ─── FixIt Dashboard ─────────────────────────────────────

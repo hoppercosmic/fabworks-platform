@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage, workbenchPage, fixitPage } from "./ui";
+import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage, workbenchPage, fixitPage, myWorkbenchPage } from "./ui";
 
 // --- Types ---
 
@@ -23,11 +23,14 @@ type TenantConfig = {
 
 type UserRole = "user" | "lead" | "supervisor" | "admin";
 
+type HomePage = "scan" | "workbench" | "fixit" | "staging" | "dashboard";
+
 type SessionUser = {
   id: number;
   name: string;
   email: string;
   role: UserRole;
+  home_page: HomePage;
 };
 
 export type { TenantConfig, StationDef, UserRole, SessionUser };
@@ -138,7 +141,7 @@ async function hashPin(pin: string): Promise<string> {
 async function getSessionUser(db: D1Database, sessionId: string | undefined): Promise<SessionUser | null> {
   if (!sessionId) return null;
   const row = await db.prepare(
-    `SELECT u.id, u.name, u.email, u.role FROM sessions s
+    `SELECT u.id, u.name, u.email, u.role, u.home_page FROM sessions s
      JOIN users u ON s.user_id = u.id
      WHERE s.id = ? AND s.expires_at > datetime('now') AND u.active = 1`
   ).bind(sessionId).first<SessionUser>();
@@ -211,7 +214,7 @@ app.post("/api/auth/login", async (c) => {
 
   const pinHash = await hashPin(pin);
   const user = await c.env.DB.prepare(
-    "SELECT id, name, email, role FROM users WHERE email = ? COLLATE NOCASE AND pin = ? AND active = 1"
+    "SELECT id, name, email, role, home_page FROM users WHERE email = ? COLLATE NOCASE AND pin = ? AND active = 1"
   ).bind(email.trim(), pinHash).first<SessionUser>();
   if (!user) return c.json({ error: "Invalid email or PIN" }, 401);
 
@@ -238,28 +241,41 @@ app.get("/api/auth/me", (c) => {
   return c.json(user);
 });
 
+const VALID_HOME_PAGES: HomePage[] = ["scan", "workbench", "fixit", "staging", "dashboard"];
+
+app.put("/api/auth/home", requireAuth(), async (c) => {
+  const user = c.get("user")!;
+  const { home_page } = await c.req.json<{ home_page: string }>();
+  if (!VALID_HOME_PAGES.includes(home_page as HomePage)) {
+    return c.json({ error: `Invalid home_page. Must be one of: ${VALID_HOME_PAGES.join(", ")}` }, 400);
+  }
+  await c.env.DB.prepare("UPDATE users SET home_page = ? WHERE id = ?").bind(home_page, user.id).run();
+  return c.json({ ok: true, home_page });
+});
+
 // --- User Management (admin only) ---
 
 app.get("/api/users", requireAuth("admin"), async (c) => {
-  const result = await c.env.DB.prepare("SELECT id, name, email, role, active, created_at FROM users ORDER BY name").all();
+  const result = await c.env.DB.prepare("SELECT id, name, email, role, home_page, active, created_at FROM users ORDER BY name").all();
   return c.json(result.results);
 });
 
 app.post("/api/users", requireAuth("admin"), async (c) => {
-  const { name, email, pin, role } = await c.req.json<{ name: string; email: string; pin: string; role?: UserRole }>();
+  const { name, email, pin, role, home_page } = await c.req.json<{ name: string; email: string; pin: string; role?: UserRole; home_page?: HomePage }>();
   if (!name || !email || !pin) return c.json({ error: "name, email, and pin required" }, 400);
   if (pin.length < 4) return c.json({ error: "PIN must be at least 4 characters" }, 400);
+  if (home_page && !VALID_HOME_PAGES.includes(home_page)) return c.json({ error: "Invalid home_page" }, 400);
 
   const pinHash = await hashPin(pin);
   const result = await c.env.DB.prepare(
-    "INSERT INTO users (name, email, pin, role) VALUES (?, ?, ?, ?) RETURNING id, name, email, role, active, created_at"
-  ).bind(name.trim(), email.trim(), pinHash, role || "user").first();
+    "INSERT INTO users (name, email, pin, role, home_page) VALUES (?, ?, ?, ?, ?) RETURNING id, name, email, role, home_page, active, created_at"
+  ).bind(name.trim(), email.trim(), pinHash, role || "user", home_page || "scan").first();
   return c.json(result, 201);
 });
 
 app.put("/api/users/:id", requireAuth("admin"), async (c) => {
   const userId = c.req.param("id");
-  const body = await c.req.json<{ name?: string; email?: string; pin?: string; role?: UserRole; active?: boolean }>();
+  const body = await c.req.json<{ name?: string; email?: string; pin?: string; role?: UserRole; active?: boolean; home_page?: HomePage }>();
 
   const updates: string[] = [];
   const binds: unknown[] = [];
@@ -272,6 +288,10 @@ app.put("/api/users/:id", requireAuth("admin"), async (c) => {
   }
   if (body.role) { updates.push("role = ?"); binds.push(body.role); }
   if (body.active !== undefined) { updates.push("active = ?"); binds.push(body.active ? 1 : 0); }
+  if (body.home_page) {
+    if (!VALID_HOME_PAGES.includes(body.home_page)) return c.json({ error: "Invalid home_page" }, 400);
+    updates.push("home_page = ?"); binds.push(body.home_page);
+  }
 
   if (updates.length === 0) return c.json({ error: "Nothing to update" }, 400);
   binds.push(userId);
@@ -1161,6 +1181,71 @@ app.post("/api/build/:id/complete", requireAuth(), async (c) => {
   });
 });
 
+// --- My Workbench (assembler home) ---
+
+app.get("/api/my/workbench", requireAuth(), async (c) => {
+  const config = c.get("config");
+  const user = c.get("user")!;
+
+  const assemblyStart = config.stations.find((s) => s.sets_status === "assembling");
+  const assemblyComplete = config.stations.find((s) => s.sets_status === "assembled");
+
+  const activeSession = await c.env.DB.prepare(
+    `SELECT bs.*, cab.cabinet_number, cab.label, cab.accessories, cab.notes, cab.assembly_sheet_url,
+            j.job_number, j.job_name
+     FROM build_sessions bs
+     JOIN cabinets cab ON bs.cabinet_id = cab.id
+     JOIN jobs j ON bs.job_id = j.id
+     WHERE bs.user_id = ? AND bs.completed_at IS NULL`
+  ).bind(user.id).first();
+
+  let available: unknown[] = [];
+  if (assemblyStart) {
+    const result = await c.env.DB.prepare(
+      `SELECT cab.id, cab.cabinet_number, cab.label, cab.accessories, cab.notes, cab.assembly_sheet_url,
+              j.id as job_id, j.job_number, j.job_name, b.name as bucket_name,
+              s.scanned_at as ready_at
+       FROM cabinets cab
+       JOIN jobs j ON cab.job_id = j.id
+       LEFT JOIN buckets b ON cab.bucket_id = b.id
+       JOIN scans s ON s.cabinet_id = cab.id AND s.station = ?
+       WHERE j.status = 'active'
+         AND cab.status != 'assembling' AND cab.status != 'assembled' AND cab.status != ?
+         AND NOT EXISTS (SELECT 1 FROM build_sessions bs2 WHERE bs2.cabinet_id = cab.id AND bs2.completed_at IS NULL)
+       ORDER BY s.scanned_at DESC
+       LIMIT 20`
+    ).bind(
+      config.stations.filter((s) => s.level === "l3" && s.seq < (assemblyStart.seq)).pop()?.slug || "to_assembly",
+      config.l3_terminal_status,
+    ).all();
+    available = result.results;
+  }
+
+  const recent = await c.env.DB.prepare(
+    `SELECT bs.id, bs.started_at, bs.completed_at, bs.total_paused_seconds,
+            ROUND((julianday(bs.completed_at) - julianday(bs.started_at)) * 1440 - bs.total_paused_seconds / 60.0, 1) as working_minutes,
+            cab.cabinet_number, cab.label, j.job_number, j.job_name
+     FROM build_sessions bs
+     JOIN cabinets cab ON bs.cabinet_id = cab.id
+     JOIN jobs j ON bs.job_id = j.id
+     WHERE bs.user_id = ? AND bs.completed_at IS NOT NULL
+     ORDER BY bs.completed_at DESC
+     LIMIT 10`
+  ).bind(user.id).all();
+
+  const todayCompleted = await c.env.DB.prepare(
+    "SELECT COUNT(*) as cnt FROM build_sessions WHERE user_id = ? AND completed_at IS NOT NULL AND DATE(completed_at) = DATE('now')"
+  ).bind(user.id).first<{ cnt: number }>();
+
+  return c.json({
+    active_session: activeSession || null,
+    available,
+    recent: recent.results,
+    today_completed: todayCompleted?.cnt || 0,
+    labels: config.entity_labels,
+  });
+});
+
 // --- FixIt System ---
 
 const ROOT_CAUSES = ["cnc_error", "material_defect", "transit_damage", "other"] as const;
@@ -1303,7 +1388,18 @@ app.get("/login", (c) => {
   if (c.get("user")) return c.redirect("/");
   return c.html(loginPage());
 });
-app.get("/", requireAuth(), (c) => c.html(scanPage(c.get("config"), c.get("user")!)));
+app.get("/", requireAuth(), (c) => {
+  const user = c.get("user")!;
+  const config = c.get("config");
+  switch (user.home_page) {
+    case "workbench": return c.html(myWorkbenchPage(config, user));
+    case "fixit": return c.redirect("/fixit");
+    case "staging": return c.redirect("/stations");
+    case "dashboard": return c.redirect("/dashboard");
+    default: return c.html(scanPage(config, user));
+  }
+});
+app.get("/scan", requireAuth(), (c) => c.html(scanPage(c.get("config"), c.get("user")!)));
 app.get("/jobs/new", requireAuth(), (c) => c.html(newJobPage(c.get("config"), c.get("user")!)));
 app.get("/dashboard", requireAuth(), (c) => c.html(dashboardPage(c.get("config"), c.get("user")!)));
 app.get("/job/:id", requireAuth(), (c) => c.html(jobDetailPage(c.get("config"), c.get("user")!)));
