@@ -445,6 +445,7 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
     var selectedEntityId = null;
     var jobData = null;
     var debounceTimer = null;
+    var pendingStation = null;
 
     var stationPrev = document.getElementById('station-prev');
     var stationCurrent = document.getElementById('station-current');
@@ -581,11 +582,17 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
       scanBtn.disabled = !selectedEntityId;
     }
 
-    scanBtn.addEventListener('click', function() {
-      if (scanBtn.disabled) return;
-      var station = getStation(selectedStation);
+    var actionInFlight = false;
 
-      if (station && station.sets_status === 'assembling' && selectedEntityId) {
+    function fireAction() {
+      if (!selectedStation || !jobData) return;
+      var station = getStation(selectedStation);
+      if (!station) return;
+      if (station.level !== 'l1' && !selectedEntityId) return;
+      if (actionInFlight) return;
+      actionInFlight = true;
+
+      if (station.sets_status === 'assembling' && selectedEntityId) {
         scanBtn.disabled = true;
         scanBtn.textContent = 'Starting...';
         fetch('/api/build/start', {
@@ -595,6 +602,7 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
         }).then(function(res) {
           return res.json().then(function(d) { return { ok: res.ok, data: d }; });
         }).then(function(r) {
+          actionInFlight = false;
           if (r.ok || r.data.active_session_id) {
             window.location.href = '/workbench';
           } else {
@@ -628,6 +636,7 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
       }).then(function(res) {
         return res.json().then(function(data) { return { ok: res.ok, data: data }; });
       }).then(function(r) {
+        actionInFlight = false;
         if (r.ok) {
           resultDiv.className = 'result success';
           resultDiv.innerHTML = r.data.station + '<div class="detail">' +
@@ -645,11 +654,17 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
         scanBtn.textContent = 'Log Scan';
         updateScanBtn();
       }).catch(function() {
+        actionInFlight = false;
         resultDiv.className = 'result error';
         resultDiv.innerHTML = 'Network error';
         scanBtn.textContent = 'Log Scan';
         updateScanBtn();
       });
+    }
+
+    scanBtn.addEventListener('click', function() {
+      if (scanBtn.disabled) return;
+      fireAction();
     });
 
     // --- QR Scanner ---
@@ -690,6 +705,13 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
 
     document.getElementById('scanner-close').addEventListener('click', stopScanner);
 
+    function tryAutoFire() {
+      if (!pendingStation || !jobData || !selectedEntityId) return;
+      selectStation(pendingStation);
+      pendingStation = null;
+      fireAction();
+    }
+
     function handleQR(text) {
       stopScanner();
       var parts = text.split(':');
@@ -698,6 +720,26 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
         return;
       }
       var type = parts[1];
+
+      if (type === 'sta') {
+        var slug = parts[2];
+        var station = getStation(slug);
+        if (!station) {
+          resultDiv.className = 'result error';
+          resultDiv.innerHTML = 'Unknown station: ' + slug;
+          resultDiv.style.display = 'block';
+          return;
+        }
+        selectStation(slug);
+        if (jobData && (station.level === 'l1' || selectedEntityId)) {
+          fireAction();
+        } else {
+          pendingStation = slug;
+          showToast(station.name + ' — scan a ' + LABELS.l3.toLowerCase());
+        }
+        return;
+      }
+
       var id = parseInt(parts[2]);
 
       if (type === 'l1' || type === 'job') {
@@ -728,6 +770,7 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
               selectedEntityId = id;
               loadJobContext();
               updateScanBtn();
+              tryAutoFire();
             }
           });
         });
@@ -749,6 +792,7 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
               selectedEntityId = id;
               loadJobContext();
               updateScanBtn();
+              tryAutoFire();
             }
           });
         });
@@ -998,6 +1042,7 @@ export function jobDetailPage(config: TenantConfig, user: SessionUser): string {
         <div class="job-meta" id="job-meta"></div>
         <div style="margin-top:8px">
           <button class="btn btn-sm" id="print-labels-btn" style="background:var(--accent);color:white">Print QR Labels</button>
+          <button class="btn btn-sm" id="print-station-btn" style="background:var(--success);color:white;margin-left:6px">Print Station Codes</button>
           <a class="btn btn-sm" id="progress-link" style="background:var(--purple);color:white;text-decoration:none;display:inline-block;margin-left:6px">Progress Matrix</a>
         </div>
       </div>
@@ -1051,6 +1096,7 @@ export function jobDetailPage(config: TenantConfig, user: SessionUser): string {
 `, `
     ${stationNamesJS(config)}
     var LABELS = ${JSON.stringify(config.entity_labels)};
+    var STATIONS = ${JSON.stringify(config.stations)};
     ${displayStatusJS(config)}
     ${STATUS_COLOR_JS}
 
@@ -1254,6 +1300,33 @@ export function jobDetailPage(config: TenantConfig, user: SessionUser): string {
       job.cabinets.forEach(function(c) {
         var label = c.label || (LABELS.l3 + ' ' + c.cabinet_number);
         makeLabel('fw:l3:' + c.id + ':' + label, label, LABELS.l3 + ' #' + c.cabinet_number + ' — ' + job.job_number);
+      });
+
+      setTimeout(function() { window.print(); }, 300);
+    });
+
+    document.getElementById('print-station-btn').addEventListener('click', function() {
+      if (typeof QRCode === 'undefined') return;
+      var grid = document.getElementById('label-grid');
+      var panel = document.getElementById('labels-panel');
+      grid.innerHTML = '';
+      panel.style.display = 'block';
+
+      STATIONS.forEach(function(s) {
+        var div = document.createElement('div');
+        div.className = 'qr-label';
+        var canvas = document.createElement('canvas');
+        QRCode.toCanvas(canvas, 'fw:sta:' + s.slug, { width: 120, margin: 1 });
+        div.appendChild(canvas);
+        var t = document.createElement('div');
+        t.className = 'qr-title';
+        t.textContent = s.name;
+        div.appendChild(t);
+        var sub = document.createElement('div');
+        sub.className = 'qr-sub';
+        sub.textContent = s.level.toUpperCase() + ' Station — ' + s.slug;
+        div.appendChild(sub);
+        grid.appendChild(div);
       });
 
       setTimeout(function() { window.print(); }, 300);
