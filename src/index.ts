@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage } from "./ui";
+import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage, workbenchPage, fixitPage } from "./ui";
 
 // --- Types ---
 
@@ -150,9 +150,28 @@ function hasRole(user: SessionUser | null, minRole: UserRole): boolean {
   return ROLE_LEVELS[user.role] >= ROLE_LEVELS[minRole];
 }
 
+// --- Helpers ---
+
+async function checkBucketCompletion(db: D1Database, cabinetId: number, config: TenantConfig) {
+  const cabinet = await db.prepare(
+    "SELECT bucket_id FROM cabinets WHERE id = ?"
+  ).bind(cabinetId).first<{ bucket_id: number | null }>();
+
+  if (cabinet?.bucket_id) {
+    const remaining = await db.prepare(
+      "SELECT COUNT(*) as cnt FROM cabinets WHERE bucket_id = ? AND status != ?"
+    ).bind(cabinet.bucket_id, config.l3_terminal_status).first<{ cnt: number }>();
+
+    if (remaining?.cnt === 0) {
+      await db.prepare("UPDATE buckets SET status = 'complete' WHERE id = ?")
+        .bind(cabinet.bucket_id).run();
+    }
+  }
+}
+
 // --- App ---
 
-type Bindings = { DB: D1Database };
+type Bindings = { DB: D1Database; PHOTOS: R2Bucket };
 type Variables = { config: TenantConfig; user: SessionUser | null };
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
@@ -475,22 +494,8 @@ app.post("/api/scan", async (c) => {
     await c.env.DB.prepare("UPDATE cabinets SET status = ? WHERE id = ?")
       .bind(stationDef.sets_status, body.cabinet_id).run();
 
-    // Check if parent L2 is now complete
     if (stationDef.sets_status === config.l3_terminal_status) {
-      const cabinet = await c.env.DB.prepare(
-        "SELECT bucket_id FROM cabinets WHERE id = ?"
-      ).bind(body.cabinet_id).first<{ bucket_id: number | null }>();
-
-      if (cabinet?.bucket_id) {
-        const remaining = await c.env.DB.prepare(
-          "SELECT COUNT(*) as cnt FROM cabinets WHERE bucket_id = ? AND status != ?"
-        ).bind(cabinet.bucket_id, config.l3_terminal_status).first<{ cnt: number }>();
-
-        if (remaining?.cnt === 0) {
-          await c.env.DB.prepare("UPDATE buckets SET status = 'complete' WHERE id = ?")
-            .bind(cabinet.bucket_id).run();
-        }
-      }
+      await checkBucketCompletion(c.env.DB, body.cabinet_id, config);
     }
   }
 
@@ -648,8 +653,36 @@ app.get("/api/kpi/assemblers", requireAuth("lead"), async (c) => {
     dailyByAssembler[row.assembler].push({ day: row.day, completed: row.completed });
   }
 
+  const timerData = await c.env.DB.prepare(
+    `SELECT
+       u.name as assembler,
+       COUNT(*) as total_started,
+       COUNT(bs.completed_at) as total_completed,
+       ROUND(AVG(CASE WHEN bs.completed_at IS NOT NULL
+         THEN (julianday(bs.completed_at) - julianday(bs.started_at)) * 1440 - bs.total_paused_seconds / 60.0
+         END), 1) as avg_working_minutes,
+       ROUND(AVG(CASE WHEN bs.completed_at IS NOT NULL
+         THEN bs.total_paused_seconds / 60.0
+         END), 1) as avg_paused_minutes
+     FROM build_sessions bs
+     JOIN users u ON bs.user_id = u.id
+     WHERE bs.started_at >= datetime('now', '-' || ? || ' days')
+     GROUP BY bs.user_id
+     ORDER BY total_completed DESC`
+  ).bind(days).all();
+
+  const timerByAssembler: Record<string, { avg_working_minutes: number; avg_paused_minutes: number; source: string }> = {};
+  for (const row of timerData.results as Array<{ assembler: string; avg_working_minutes: number; avg_paused_minutes: number }>) {
+    timerByAssembler[row.assembler] = { avg_working_minutes: row.avg_working_minutes, avg_paused_minutes: row.avg_paused_minutes, source: "timer" };
+  }
+
+  const assemblers = (result.results as Array<Record<string, unknown>>).map((a) => {
+    const timer = timerByAssembler[a.assembler as string];
+    return { ...a, ...(timer || { source: "estimated" }) };
+  });
+
   return c.json({
-    assemblers: result.results,
+    assemblers,
     daily: dailyByAssembler,
     start_station: config.stations.find((s) => s.slug === startStation)?.name,
     end_station: config.stations.find((s) => s.slug === endStation)?.name,
@@ -971,6 +1004,299 @@ app.get("/api/stations/:slug/staging", async (c) => {
   return c.json({ jobs: Array.from(jobMap.values()) });
 });
 
+// --- Build Timer ---
+
+app.post("/api/build/start", requireAuth(), async (c) => {
+  const config = c.get("config");
+  const user = c.get("user")!;
+  const { cabinet_id } = await c.req.json<{ cabinet_id: number }>();
+  if (!cabinet_id) return c.json({ error: "cabinet_id required" }, 400);
+
+  const existing = await c.env.DB.prepare(
+    "SELECT id FROM build_sessions WHERE user_id = ? AND completed_at IS NULL"
+  ).bind(user.id).first<{ id: number }>();
+  if (existing) return c.json({ error: "You already have an active build session", active_session_id: existing.id }, 409);
+
+  const cabinetBusy = await c.env.DB.prepare(
+    "SELECT id, user_id FROM build_sessions WHERE cabinet_id = ? AND completed_at IS NULL"
+  ).bind(cabinet_id).first<{ id: number; user_id: number }>();
+  if (cabinetBusy) return c.json({ error: "This cabinet is already being built" }, 409);
+
+  const cab = await c.env.DB.prepare(
+    "SELECT c.id, c.job_id, c.cabinet_number, c.bucket_id, j.job_number, j.status as job_status FROM cabinets c JOIN jobs j ON c.job_id = j.id WHERE c.id = ?"
+  ).bind(cabinet_id).first<{ id: number; job_id: number; cabinet_number: number; bucket_id: number | null; job_number: string; job_status: string }>();
+  if (!cab) return c.json({ error: "Cabinet not found" }, 404);
+  if (cab.job_status !== "active") return c.json({ error: `Job ${cab.job_number} is ${cab.job_status}` }, 400);
+
+  const assemblyStart = config.stations.find((s) => s.sets_status === "assembling");
+  if (!assemblyStart) return c.json({ error: "No assembly start station configured" }, 500);
+
+  const session = await c.env.DB.prepare(
+    "INSERT INTO build_sessions (cabinet_id, job_id, user_id) VALUES (?, ?, ?) RETURNING id, started_at"
+  ).bind(cabinet_id, cab.job_id, user.id).first<{ id: number; started_at: string }>();
+
+  await c.env.DB.prepare("UPDATE cabinets SET status = ? WHERE id = ?")
+    .bind(assemblyStart.sets_status, cabinet_id).run();
+
+  await c.env.DB.prepare(
+    "INSERT INTO scans (job_id, bucket_id, cabinet_id, station, scanned_by) VALUES (?, ?, ?, ?, ?)"
+  ).bind(cab.job_id, cab.bucket_id || null, cabinet_id, assemblyStart.slug, user.name).run();
+
+  return c.json({ session_id: session!.id, cabinet_id, job_id: cab.job_id, started_at: session!.started_at }, 201);
+});
+
+app.get("/api/build/active", requireAuth(), async (c) => {
+  const user = c.get("user")!;
+  const session = await c.env.DB.prepare(
+    `SELECT bs.*, cab.cabinet_number, cab.label, cab.accessories, cab.notes, cab.assembly_sheet_url,
+            j.job_number, j.job_name
+     FROM build_sessions bs
+     JOIN cabinets cab ON bs.cabinet_id = cab.id
+     JOIN jobs j ON bs.job_id = j.id
+     WHERE bs.user_id = ? AND bs.completed_at IS NULL`
+  ).bind(user.id).first();
+  return c.json({ session: session || null });
+});
+
+app.get("/api/build/:id", requireAuth(), async (c) => {
+  const user = c.get("user")!;
+  const id = parseInt(c.req.param("id"), 10);
+  const session = await c.env.DB.prepare(
+    `SELECT bs.*, cab.cabinet_number, cab.label, cab.accessories, cab.notes, cab.assembly_sheet_url,
+            j.job_number, j.job_name
+     FROM build_sessions bs
+     JOIN cabinets cab ON bs.cabinet_id = cab.id
+     JOIN jobs j ON bs.job_id = j.id
+     WHERE bs.id = ? AND bs.user_id = ?`
+  ).bind(id, user.id).first();
+  if (!session) return c.json({ error: "Session not found" }, 404);
+  return c.json({ session });
+});
+
+app.post("/api/build/:id/pause", requireAuth(), async (c) => {
+  const user = c.get("user")!;
+  const id = parseInt(c.req.param("id"), 10);
+  const session = await c.env.DB.prepare(
+    "SELECT id, paused_at, completed_at, user_id FROM build_sessions WHERE id = ?"
+  ).bind(id).first<{ id: number; paused_at: string | null; completed_at: string | null; user_id: number }>();
+  if (!session || session.user_id !== user.id) return c.json({ error: "Session not found" }, 404);
+  if (session.completed_at) return c.json({ error: "Session already completed" }, 400);
+  if (session.paused_at) return c.json({ error: "Already paused" }, 400);
+
+  await c.env.DB.prepare("UPDATE build_sessions SET paused_at = datetime('now') WHERE id = ?").bind(id).run();
+  return c.json({ ok: true });
+});
+
+app.post("/api/build/:id/resume", requireAuth(), async (c) => {
+  const user = c.get("user")!;
+  const id = parseInt(c.req.param("id"), 10);
+  const session = await c.env.DB.prepare(
+    "SELECT id, paused_at, completed_at, user_id, total_paused_seconds FROM build_sessions WHERE id = ?"
+  ).bind(id).first<{ id: number; paused_at: string | null; completed_at: string | null; user_id: number; total_paused_seconds: number }>();
+  if (!session || session.user_id !== user.id) return c.json({ error: "Session not found" }, 404);
+  if (session.completed_at) return c.json({ error: "Session already completed" }, 400);
+  if (!session.paused_at) return c.json({ error: "Not paused" }, 400);
+
+  const pauseDuration = await c.env.DB.prepare(
+    "SELECT CAST((julianday('now') - julianday(?)) * 86400 AS INTEGER) as secs"
+  ).bind(session.paused_at).first<{ secs: number }>();
+
+  const newTotal = session.total_paused_seconds + (pauseDuration?.secs || 0);
+  await c.env.DB.prepare(
+    "UPDATE build_sessions SET paused_at = NULL, total_paused_seconds = ? WHERE id = ?"
+  ).bind(newTotal, id).run();
+
+  return c.json({ ok: true, total_paused_seconds: newTotal });
+});
+
+app.post("/api/build/:id/complete", requireAuth(), async (c) => {
+  const config = c.get("config");
+  const user = c.get("user")!;
+  const id = parseInt(c.req.param("id"), 10);
+  const session = await c.env.DB.prepare(
+    "SELECT id, cabinet_id, job_id, paused_at, completed_at, user_id, total_paused_seconds, started_at FROM build_sessions WHERE id = ?"
+  ).bind(id).first<{ id: number; cabinet_id: number; job_id: number; paused_at: string | null; completed_at: string | null; user_id: number; total_paused_seconds: number; started_at: string }>();
+  if (!session || session.user_id !== user.id) return c.json({ error: "Session not found" }, 404);
+  if (session.completed_at) return c.json({ error: "Session already completed" }, 400);
+
+  let totalPaused = session.total_paused_seconds;
+  if (session.paused_at) {
+    const pauseDuration = await c.env.DB.prepare(
+      "SELECT CAST((julianday('now') - julianday(?)) * 86400 AS INTEGER) as secs"
+    ).bind(session.paused_at).first<{ secs: number }>();
+    totalPaused += pauseDuration?.secs || 0;
+  }
+
+  await c.env.DB.prepare(
+    "UPDATE build_sessions SET completed_at = datetime('now'), paused_at = NULL, total_paused_seconds = ? WHERE id = ?"
+  ).bind(totalPaused, id).run();
+
+  const assemblyComplete = config.stations.find((s) => s.sets_status === "assembled");
+  if (assemblyComplete) {
+    await c.env.DB.prepare("UPDATE cabinets SET status = ? WHERE id = ?")
+      .bind(assemblyComplete.sets_status, session.cabinet_id).run();
+
+    const cab = await c.env.DB.prepare("SELECT bucket_id FROM cabinets WHERE id = ?")
+      .bind(session.cabinet_id).first<{ bucket_id: number | null }>();
+
+    await c.env.DB.prepare(
+      "INSERT INTO scans (job_id, bucket_id, cabinet_id, station, scanned_by) VALUES (?, ?, ?, ?, ?)"
+    ).bind(session.job_id, cab?.bucket_id || null, session.cabinet_id, assemblyComplete.slug, user.name).run();
+
+    if (assemblyComplete.sets_status === config.l3_terminal_status) {
+      await checkBucketCompletion(c.env.DB, session.cabinet_id, config);
+    }
+  }
+
+  const completed = await c.env.DB.prepare(
+    "SELECT completed_at, ROUND((julianday(completed_at) - julianday(started_at)) * 1440, 1) as total_minutes FROM build_sessions WHERE id = ?"
+  ).bind(id).first<{ completed_at: string; total_minutes: number }>();
+
+  return c.json({
+    ok: true,
+    completed_at: completed!.completed_at,
+    total_paused_seconds: totalPaused,
+    total_minutes: completed!.total_minutes,
+    working_minutes: Math.round((completed!.total_minutes - totalPaused / 60) * 10) / 10,
+  });
+});
+
+// --- FixIt System ---
+
+const ROOT_CAUSES = ["cnc_error", "material_defect", "transit_damage", "other"] as const;
+const ROOT_CAUSE_LABELS: Record<string, string> = {
+  cnc_error: "CNC Error",
+  material_defect: "Material Defect",
+  transit_damage: "Transit Damage",
+  other: "Other",
+};
+
+app.post("/api/fixit", requireAuth(), async (c) => {
+  const user = c.get("user")!;
+  const contentType = c.req.header("content-type") || "";
+
+  let cabinetId: number;
+  let buildSessionId: number | null = null;
+  let rootCause: string;
+  let description: string | null = null;
+  let photoKey: string | null = null;
+
+  if (contentType.includes("multipart/form-data")) {
+    const form = await c.req.parseBody();
+    cabinetId = parseInt(form.cabinet_id as string, 10);
+    buildSessionId = form.build_session_id ? parseInt(form.build_session_id as string, 10) : null;
+    rootCause = form.root_cause as string;
+    description = (form.description as string) || null;
+
+    const photo = form.photo as File | undefined;
+    if (photo && photo.size > 0) {
+      const ext = photo.name?.split(".").pop() || "jpg";
+      photoKey = `fixit/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`;
+      try {
+        await c.env.PHOTOS.put(photoKey, photo.stream(), {
+          httpMetadata: { contentType: photo.type || "image/jpeg" },
+        });
+      } catch {
+        photoKey = null;
+      }
+    }
+  } else {
+    const body = await c.req.json<{ cabinet_id: number; build_session_id?: number; root_cause: string; description?: string }>();
+    cabinetId = body.cabinet_id;
+    buildSessionId = body.build_session_id || null;
+    rootCause = body.root_cause;
+    description = body.description || null;
+  }
+
+  if (!cabinetId || !rootCause) return c.json({ error: "cabinet_id and root_cause required" }, 400);
+  if (!ROOT_CAUSES.includes(rootCause as any)) {
+    return c.json({ error: `Invalid root_cause. Must be one of: ${ROOT_CAUSES.join(", ")}` }, 400);
+  }
+
+  const cab = await c.env.DB.prepare(
+    "SELECT id, job_id FROM cabinets WHERE id = ?"
+  ).bind(cabinetId).first<{ id: number; job_id: number }>();
+  if (!cab) return c.json({ error: "Cabinet not found" }, 404);
+
+  const result = await c.env.DB.prepare(
+    `INSERT INTO fixit_requests (cabinet_id, job_id, build_session_id, requested_by, root_cause, description, photo_key)
+     VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id, created_at`
+  ).bind(cab.id, cab.job_id, buildSessionId, user.id, rootCause, description, photoKey).first<{ id: number; created_at: string }>();
+
+  return c.json({ id: result!.id, created_at: result!.created_at, photo_key: photoKey }, 201);
+});
+
+app.get("/api/fixit", requireAuth(), async (c) => {
+  const status = c.req.query("status") || "open";
+  const result = await c.env.DB.prepare(
+    `SELECT f.*, u.name as requested_by_name, cab.cabinet_number, cab.label as cabinet_label,
+            j.job_number, j.job_name,
+            ru.name as resolved_by_name
+     FROM fixit_requests f
+     JOIN users u ON f.requested_by = u.id
+     JOIN cabinets cab ON f.cabinet_id = cab.id
+     JOIN jobs j ON f.job_id = j.id
+     LEFT JOIN users ru ON f.resolved_by = ru.id
+     WHERE f.status = ?
+     ORDER BY f.created_at DESC
+     LIMIT 100`
+  ).bind(status).all();
+  return c.json({ requests: result.results, root_cause_labels: ROOT_CAUSE_LABELS });
+});
+
+app.get("/api/fixit/:id", requireAuth(), async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  const result = await c.env.DB.prepare(
+    `SELECT f.*, u.name as requested_by_name, cab.cabinet_number, cab.label as cabinet_label,
+            j.job_number, j.job_name,
+            ru.name as resolved_by_name
+     FROM fixit_requests f
+     JOIN users u ON f.requested_by = u.id
+     JOIN cabinets cab ON f.cabinet_id = cab.id
+     JOIN jobs j ON f.job_id = j.id
+     LEFT JOIN users ru ON f.resolved_by = ru.id
+     WHERE f.id = ?`
+  ).bind(id).first();
+  if (!result) return c.json({ error: "FixIt request not found" }, 404);
+  return c.json(result);
+});
+
+app.post("/api/fixit/:id/resolve", requireAuth("lead"), async (c) => {
+  const user = c.get("user")!;
+  const id = parseInt(c.req.param("id"), 10);
+  const body = await c.req.json<{ resolution_note?: string }>();
+
+  const existing = await c.env.DB.prepare("SELECT id, status FROM fixit_requests WHERE id = ?").bind(id).first<{ id: number; status: string }>();
+  if (!existing) return c.json({ error: "FixIt request not found" }, 404);
+  if (existing.status === "resolved") return c.json({ error: "Already resolved" }, 400);
+
+  await c.env.DB.prepare(
+    "UPDATE fixit_requests SET status = 'resolved', resolved_by = ?, resolved_at = datetime('now'), resolution_note = ? WHERE id = ?"
+  ).bind(user.id, body.resolution_note || null, id).run();
+
+  return c.json({ ok: true });
+});
+
+app.get("/api/fixit/:id/photo", requireAuth(), async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  const req = await c.env.DB.prepare("SELECT photo_key FROM fixit_requests WHERE id = ?").bind(id).first<{ photo_key: string | null }>();
+  if (!req?.photo_key) return c.json({ error: "No photo" }, 404);
+
+  try {
+    const obj = await c.env.PHOTOS.get(req.photo_key);
+    if (!obj) return c.json({ error: "Photo not found in storage" }, 404);
+
+    return new Response(obj.body, {
+      headers: {
+        "Content-Type": obj.httpMetadata?.contentType || "image/jpeg",
+        "Cache-Control": "public, max-age=86400",
+      },
+    });
+  } catch {
+    return c.json({ error: "Photo storage unavailable" }, 503);
+  }
+});
+
 // --- Pages ---
 
 app.get("/login", (c) => {
@@ -986,5 +1312,7 @@ app.get("/job/:id/progress", requireAuth(), (c) => c.html(progressPage(c.get("co
 app.get("/kpi", requireAuth("lead"), (c) => c.html(kpiPage(c.get("config"), c.get("user")!)));
 app.get("/takt", requireAuth("lead"), (c) => c.html(taktPage(c.get("config"), c.get("user")!)));
 app.get("/admin", requireAuth("admin"), (c) => c.html(adminPage(c.get("config"), c.get("user")!)));
+app.get("/workbench", requireAuth(), (c) => c.html(workbenchPage(c.get("config"), c.get("user")!)));
+app.get("/fixit", requireAuth(), (c) => c.html(fixitPage(c.get("config"), c.get("user")!)));
 
 export default app;

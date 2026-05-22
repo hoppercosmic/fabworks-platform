@@ -9,5 +9,11 @@
       "database_name": "fabworks-db",
       "database_id": "84dbe74d-c6ff-4c90-8996-91598ef284f6"
     }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "PHOTOS",
+      "bucket_name": "fabworks-photos"
+    }
   ]
 }

@@ -9,6 +9,8 @@ const SVG_GRID = IC('<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14"
 const SVG_TREND = IC('<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>');
 const SVG_CLOCK = IC('<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16.5 14.5"/>');
 const SVG_GEAR = IC('<circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>');
+const SVG_WRENCH = IC('<path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94L6.73 20.15a2.12 2.12 0 0 1-3-3l6.79-6.79A6 6 0 0 1 18.5 2.5z"/>');
+const SVG_ALERT = IC('<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>');
 
 // ─── Nav Items ───────────────────────────────────────────
 const ROLE_LEVELS: Record<UserRole, number> = { user: 0, lead: 1, supervisor: 2, admin: 3 };
@@ -16,9 +18,11 @@ const ROLE_LEVELS: Record<UserRole, number> = { user: 0, lead: 1, supervisor: 2,
 type NavItem = { path: string; label: string; icon: string; minRole: UserRole };
 const NAV_ITEMS: NavItem[] = [
   { path: "/",           label: "Scan",      icon: SVG_SCAN,  minRole: "user" },
+  { path: "/workbench",  label: "Build",     icon: SVG_WRENCH, minRole: "user" },
   { path: "/jobs/new",   label: "New Job",   icon: SVG_PLUS,  minRole: "user" },
   { path: "/dashboard",  label: "Dash",      icon: SVG_CHART, minRole: "user" },
   { path: "/stations",   label: "Stations",  icon: SVG_GRID,  minRole: "user" },
+  { path: "/fixit",      label: "FixIt",     icon: SVG_ALERT, minRole: "user" },
   { path: "/kpi",        label: "KPI",       icon: SVG_TREND, minRole: "lead" },
   { path: "/takt",       label: "Takt",      icon: SVG_CLOCK, minRole: "lead" },
   { path: "/admin",      label: "Admin",     icon: SVG_GEAR,  minRole: "admin" },
@@ -322,6 +326,7 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
   const L3 = config.entity_labels.l3;
   return page("FabWorks", `
     main { flex: 1; padding: 16px; max-width: 480px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+    #active-build-banner { background: rgba(245,158,11,0.15); border: 1px solid var(--warning, #f59e0b); color: var(--warning, #f59e0b); cursor: pointer; font-weight: 600; font-size: 0.9rem; text-align: center; padding: 10px; }
     .station-carousel { display: flex; align-items: center; justify-content: center; gap: 0; user-select: none; }
     .station-prev, .station-next {
       flex: 1; font-size: 0.8rem; color: var(--muted); opacity: 0.4; cursor: pointer;
@@ -409,6 +414,7 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
       <div id="context-label" class="section-label"></div>
       <div class="entity-list" id="entity-list"></div>
     </div>
+    <div id="active-build-banner" style="display:none" class="card" onclick="window.location.href='/workbench'"></div>
     <button class="btn btn-primary" id="scan-btn" disabled>Log Scan</button>
     <div class="result" id="result"></div>
     <div class="swipe-toast" id="swipe-toast"></div>
@@ -554,18 +560,44 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
       if (!selectedStation || !jobData) { scanBtn.disabled = true; return; }
       var station = getStation(selectedStation);
       if (!station) { scanBtn.disabled = true; return; }
+      var isBuildStation = station.sets_status === 'assembling';
+      scanBtn.textContent = isBuildStation ? 'Start Build' : 'Log Scan';
       if (station.level === 'l1') { scanBtn.disabled = false; return; }
       scanBtn.disabled = !selectedEntityId;
     }
 
     scanBtn.addEventListener('click', function() {
       if (scanBtn.disabled) return;
+      var station = getStation(selectedStation);
+
+      if (station && station.sets_status === 'assembling' && selectedEntityId) {
+        scanBtn.disabled = true;
+        scanBtn.textContent = 'Starting...';
+        fetch('/api/build/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cabinet_id: selectedEntityId }),
+        }).then(function(res) {
+          return res.json().then(function(d) { return { ok: res.ok, data: d }; });
+        }).then(function(r) {
+          if (r.ok || r.data.active_session_id) {
+            window.location.href = '/workbench';
+          } else {
+            resultDiv.className = 'result error';
+            resultDiv.innerHTML = r.data.error;
+            resultDiv.style.display = 'block';
+            scanBtn.textContent = 'Start Build';
+            updateScanBtn();
+          }
+        });
+        return;
+      }
+
       scanBtn.disabled = true;
       scanBtn.textContent = 'Logging...';
       resultDiv.className = 'result';
       resultDiv.style.display = 'none';
 
-      var station = getStation(selectedStation);
       var payload = {
         station: selectedStation,
         job_id: jobData.id,
@@ -767,6 +799,14 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
         }
       }
     }, { passive: true });
+
+    fetch('/api/build/active').then(function(r) { return r.json(); }).then(function(data) {
+      if (data.session) {
+        var b = document.getElementById('active-build-banner');
+        b.textContent = 'Build in progress — ${config.entity_labels.l3} #' + data.session.cabinet_number + ' →';
+        b.style.display = 'block';
+      }
+    });
 `, user, "/", ["https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"]);
 }
 
@@ -2015,6 +2055,9 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
     }
     .kpi-card .name { font-size: 1.1rem; font-weight: 700; }
     .kpi-card .rank { font-size: 0.7rem; color: var(--muted); }
+    .source-badge { font-size: 0.6rem; padding: 2px 6px; border-radius: 4px; font-weight: 600; text-transform: uppercase; vertical-align: middle; margin-left: 6px; }
+    .source-badge.timer { background: rgba(34,197,94,0.2); color: var(--success); }
+    .source-badge.estimated { background: rgba(148,163,184,0.2); color: var(--muted); }
     .kpi-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .kpi-stat { text-align: center; }
     .kpi-stat .val { font-size: 1.4rem; font-weight: 700; }
@@ -2127,13 +2170,21 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
                 '<span class="count">' + d.completed + '</span></div>';
             }).join('');
 
+            var src = a.source || 'estimated';
+            var badge = '<span class="source-badge ' + src + '">' + src + '</span>';
+            var cycleLabel = src === 'timer' ? 'Avg Work' : 'Avg Cycle';
+            var cycleVal = src === 'timer' && a.avg_working_minutes != null ? a.avg_working_minutes : a.avg_minutes;
+            var pauseRow = src === 'timer' && a.avg_paused_minutes != null
+              ? '<div class="kpi-stat"><div class="val warning">' + fmtMin(a.avg_paused_minutes) + '</div><div class="lbl">Avg Paused</div></div>'
+              : '';
+
             return '<div class="kpi-card">' +
-              '<div><span class="name">' + a.assembler + '</span> <span class="rank">#' + (idx + 1) + '</span></div>' +
+              '<div><span class="name">' + a.assembler + '</span> <span class="rank">#' + (idx + 1) + '</span>' + badge + '</div>' +
               '<div class="kpi-stats">' +
                 '<div class="kpi-stat"><div class="val success">' + a.total_completed + '</div><div class="lbl">Completed</div></div>' +
                 '<div class="kpi-stat"><div class="val accent">' + a.per_day + '</div><div class="lbl">Per Day</div></div>' +
-                '<div class="kpi-stat"><div class="val purple">' + fmtMin(a.avg_minutes) + '</div><div class="lbl">Avg Cycle</div></div>' +
-                '<div class="kpi-stat"><div class="val">' + a.active_days + '</div><div class="lbl">Active Days</div></div>' +
+                '<div class="kpi-stat"><div class="val purple">' + fmtMin(cycleVal) + '</div><div class="lbl">' + cycleLabel + '</div></div>' +
+                (pauseRow || '<div class="kpi-stat"><div class="val">' + a.active_days + '</div><div class="lbl">Active Days</div></div>') +
               '</div>' +
               '<div class="kpi-timing">' +
                 '<span class="fast">Best: ' + fmtMin(a.min_minutes) + '</span>' +
@@ -2698,4 +2749,451 @@ export function adminPage(config: TenantConfig, user: SessionUser): string {
 
     loadConfig();
   `, user, "/admin");
+}
+
+// ─── Workbench (Build Timer) ─────────────────────────────
+
+export function workbenchPage(config: TenantConfig, user: SessionUser): string {
+  return page("Build", `
+    .wb-empty { text-align: center; padding: 3rem 1rem; color: var(--muted); }
+    .wb-empty a { color: var(--accent); }
+    .timer-card { text-align: center; padding: 1.5rem; }
+    .timer-display { font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace; font-size: 3rem; font-weight: 700; letter-spacing: 2px; color: #fff; transition: color 0.3s; }
+    .timer-display.paused { color: var(--warning, #f59e0b); }
+    .timer-status { font-size: 0.85rem; color: var(--muted); margin-top: 0.25rem; text-transform: uppercase; letter-spacing: 1px; }
+    .cab-info { margin-top: 1rem; }
+    .cab-info .cab-number { font-size: 1.5rem; font-weight: 700; color: #fff; }
+    .cab-info .cab-label { font-size: 0.9rem; color: var(--muted); margin-top: 0.15rem; }
+    .cab-info .job-line { font-size: 0.85rem; color: var(--accent); margin-top: 0.5rem; }
+    .meta-section { margin-top: 0.75rem; border-top: 1px solid var(--border); padding-top: 0.75rem; }
+    .meta-section .meta-label { font-size: 0.7rem; text-transform: uppercase; color: var(--muted); letter-spacing: 0.5px; margin-top: 0.5rem; }
+    .meta-section .meta-value { font-size: 0.85rem; color: var(--text); margin-top: 0.15rem; white-space: pre-line; }
+    .meta-section a { color: var(--accent); text-decoration: none; }
+    .build-actions { display: flex; gap: 0.75rem; margin-top: 1rem; }
+    .build-actions button { flex: 1; padding: 1rem; font-size: 1rem; font-weight: 600; border: none; border-radius: var(--radius); cursor: pointer; }
+    .btn-pause { background: var(--warning, #f59e0b); color: #000; }
+    .btn-pause.is-paused { background: var(--accent); color: #fff; }
+    .btn-complete { background: var(--success); color: #fff; }
+    .complete-summary { text-align: center; padding: 2rem 1rem; }
+    .complete-summary .done-icon { font-size: 3rem; margin-bottom: 0.5rem; }
+    .complete-summary .done-time { font-size: 1.5rem; font-weight: 700; color: #fff; }
+    .complete-summary .done-detail { font-size: 0.85rem; color: var(--muted); margin-top: 0.5rem; }
+    .complete-summary a { display: inline-block; margin-top: 1.5rem; color: var(--accent); font-weight: 600; text-decoration: none; }
+    .btn-fixit { background: var(--error); color: #fff; }
+    .fixit-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 200; display: none; flex-direction: column; align-items: center; padding: 1rem; overflow-y: auto; }
+    .fixit-overlay.active { display: flex; }
+    .fixit-form { width: 100%; max-width: 440px; margin-top: 60px; display: flex; flex-direction: column; gap: 1rem; }
+    .fixit-form h2 { color: var(--error); font-size: 1.3rem; text-align: center; }
+    .fixit-form .close-btn { position: absolute; top: 16px; right: 16px; background: none; border: none; color: #fff; font-size: 2rem; cursor: pointer; }
+    .cause-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .cause-btn { padding: 12px; border: 2px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 0.85rem; font-weight: 600; cursor: pointer; text-align: center; transition: all 0.15s; }
+    .cause-btn.selected { border-color: var(--error); background: rgba(239,68,68,0.15); color: var(--error); }
+    .fixit-form textarea { min-height: 80px; resize: vertical; }
+    .photo-row { display: flex; gap: 0.5rem; align-items: center; }
+    .photo-row label { flex: 1; padding: 12px; border: 2px dashed var(--border); border-radius: 8px; text-align: center; cursor: pointer; color: var(--muted); font-size: 0.85rem; }
+    .photo-row label.has-file { border-color: var(--success); color: var(--success); border-style: solid; }
+    .photo-row input { display: none; }
+    .fixit-submit { padding: 1rem; font-size: 1rem; font-weight: 600; border: none; border-radius: var(--radius); background: var(--error); color: #fff; cursor: pointer; }
+    .fixit-submit:disabled { opacity: 0.5; cursor: default; }
+    .fixit-sent { text-align: center; color: var(--success); font-weight: 600; font-size: 1.1rem; padding: 1rem; }
+  `, `
+    <div id="loading" style="text-align:center;padding:3rem;color:var(--muted);">Loading...</div>
+    <div id="no-session" class="wb-empty" style="display:none">
+      <p>No active build session.</p>
+      <p style="margin-top:0.75rem"><a href="/">Go to Scan to start a build</a></p>
+    </div>
+    <div id="workbench" style="display:none">
+      <div class="card timer-card">
+        <div class="timer-display" id="timer-display">00:00:00</div>
+        <div class="timer-status" id="timer-status">Working</div>
+      </div>
+      <div class="card cab-info" id="cab-info">
+        <div class="cab-number" id="cab-number"></div>
+        <div class="cab-label" id="cab-label"></div>
+        <div class="job-line" id="job-line"></div>
+        <div class="meta-section" id="meta-section"></div>
+      </div>
+      <div class="build-actions">
+        <button class="btn-pause" id="pause-btn">Pause</button>
+        <button class="btn-fixit" id="fixit-btn">FixIt</button>
+        <button class="btn-complete" id="complete-btn">Complete</button>
+      </div>
+    </div>
+    <div id="complete-view" class="card complete-summary" style="display:none"></div>
+    <div class="fixit-overlay" id="fixit-overlay">
+      <button class="close-btn" id="fixit-close">×</button>
+      <div class="fixit-form" id="fixit-form">
+        <h2>Report a Problem</h2>
+        <div class="section-label">Root Cause</div>
+        <div class="cause-grid">
+          <button class="cause-btn" data-cause="cnc_error">CNC Error</button>
+          <button class="cause-btn" data-cause="material_defect">Material Defect</button>
+          <button class="cause-btn" data-cause="transit_damage">Transit Damage</button>
+          <button class="cause-btn" data-cause="other">Other</button>
+        </div>
+        <div class="section-label">Description (optional)</div>
+        <textarea class="input" id="fixit-desc" placeholder="What's wrong?"></textarea>
+        <div class="section-label">Photo (optional)</div>
+        <div class="photo-row">
+          <label id="photo-label" for="fixit-photo">📷 Tap to take photo</label>
+          <input type="file" id="fixit-photo" accept="image/*" capture="environment">
+        </div>
+        <button class="fixit-submit" id="fixit-submit" disabled>Submit FixIt</button>
+        <div id="fixit-result"></div>
+      </div>
+    </div>
+  `, `
+    function escHtml(s) { return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
+    function fmtTime(totalSec) {
+      var h = Math.floor(totalSec / 3600);
+      var m = Math.floor((totalSec % 3600) / 60);
+      var s = Math.floor(totalSec % 60);
+      return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
+    }
+
+    var sessionId = null;
+    var currentCabinetId = null;
+    var startedAtMs = 0;
+    var totalPausedMs = 0;
+    var pausedAtMs = 0;
+    var isPaused = false;
+    var timerInterval = null;
+
+    function updateTimer() {
+      var now = Date.now();
+      var elapsed = (now - startedAtMs) / 1000 - totalPausedMs / 1000;
+      if (isPaused) elapsed -= (now - pausedAtMs) / 1000;
+      if (elapsed < 0) elapsed = 0;
+      document.getElementById('timer-display').textContent = fmtTime(elapsed);
+    }
+
+    function renderSession(s) {
+      sessionId = s.id;
+      currentCabinetId = s.cabinet_id;
+      startedAtMs = new Date(s.started_at + 'Z').getTime();
+      totalPausedMs = (s.total_paused_seconds || 0) * 1000;
+      isPaused = !!s.paused_at;
+      pausedAtMs = isPaused ? new Date(s.paused_at + 'Z').getTime() : 0;
+
+      document.getElementById('cab-number').textContent = '${config.entity_labels.l3} #' + s.cabinet_number;
+      document.getElementById('cab-label').textContent = s.label || '';
+      document.getElementById('job-line').textContent = s.job_number + ' — ' + s.job_name;
+
+      var meta = '';
+      if (s.accessories) meta += '<div class="meta-label">Accessories</div><div class="meta-value">' + escHtml(s.accessories) + '</div>';
+      if (s.notes) meta += '<div class="meta-label">Notes</div><div class="meta-value">' + escHtml(s.notes) + '</div>';
+      if (s.assembly_sheet_url) meta += '<div class="meta-label">Assembly Sheet</div><div class="meta-value"><a href="' + escHtml(s.assembly_sheet_url) + '" target="_blank" rel="noopener">Open Assembly Sheet ↗</a></div>';
+      document.getElementById('meta-section').innerHTML = meta;
+
+      var pauseBtn = document.getElementById('pause-btn');
+      if (isPaused) {
+        pauseBtn.textContent = 'Resume';
+        pauseBtn.classList.add('is-paused');
+        document.getElementById('timer-display').classList.add('paused');
+        document.getElementById('timer-status').textContent = 'Paused';
+      } else {
+        pauseBtn.textContent = 'Pause';
+        pauseBtn.classList.remove('is-paused');
+        document.getElementById('timer-display').classList.remove('paused');
+        document.getElementById('timer-status').textContent = 'Working';
+      }
+
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('workbench').style.display = 'block';
+
+      if (timerInterval) clearInterval(timerInterval);
+      updateTimer();
+      timerInterval = setInterval(updateTimer, 1000);
+    }
+
+    fetch('/api/build/active').then(function(r) { return r.json(); }).then(function(data) {
+      if (data.session) {
+        renderSession(data.session);
+      } else {
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('no-session').style.display = 'block';
+      }
+    });
+
+    document.getElementById('pause-btn').addEventListener('click', function() {
+      if (!sessionId) return;
+      var action = isPaused ? 'resume' : 'pause';
+      fetch('/api/build/' + sessionId + '/' + action, { method: 'POST' })
+        .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+        .then(function(r) {
+          if (!r.ok) return;
+          if (action === 'pause') {
+            isPaused = true;
+            pausedAtMs = Date.now();
+            document.getElementById('pause-btn').textContent = 'Resume';
+            document.getElementById('pause-btn').classList.add('is-paused');
+            document.getElementById('timer-display').classList.add('paused');
+            document.getElementById('timer-status').textContent = 'Paused';
+          } else {
+            totalPausedMs = (r.data.total_paused_seconds || 0) * 1000;
+            isPaused = false;
+            pausedAtMs = 0;
+            document.getElementById('pause-btn').textContent = 'Pause';
+            document.getElementById('pause-btn').classList.remove('is-paused');
+            document.getElementById('timer-display').classList.remove('paused');
+            document.getElementById('timer-status').textContent = 'Working';
+          }
+        });
+    });
+
+    document.getElementById('complete-btn').addEventListener('click', function() {
+      if (!sessionId) return;
+      if (!confirm('Complete this build?')) return;
+      fetch('/api/build/' + sessionId + '/complete', { method: 'POST' })
+        .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+        .then(function(r) {
+          if (!r.ok) return;
+          if (timerInterval) clearInterval(timerInterval);
+          document.getElementById('workbench').style.display = 'none';
+          var cv = document.getElementById('complete-view');
+          cv.style.display = 'block';
+          cv.innerHTML = '<div class="done-icon">✓</div>'
+            + '<div class="done-time">' + r.data.working_minutes + ' min</div>'
+            + '<div class="done-detail">Total elapsed: ' + r.data.total_minutes + ' min'
+            + (r.data.total_paused_seconds > 0 ? ' (paused ' + Math.round(r.data.total_paused_seconds / 60 * 10) / 10 + ' min)' : '')
+            + '</div>'
+            + '<a href="/">Start Next Build →</a>';
+        });
+    });
+
+    var fixitOverlay = document.getElementById('fixit-overlay');
+    var fixitSelectedCause = null;
+    var fixitCabinetId = null;
+
+    document.querySelectorAll('.cause-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        document.querySelectorAll('.cause-btn').forEach(function(b) { b.classList.remove('selected'); });
+        btn.classList.add('selected');
+        fixitSelectedCause = btn.dataset.cause;
+        document.getElementById('fixit-submit').disabled = false;
+      });
+    });
+
+    document.getElementById('fixit-photo').addEventListener('change', function(e) {
+      var label = document.getElementById('photo-label');
+      if (e.target.files && e.target.files.length > 0) {
+        label.textContent = '✓ ' + e.target.files[0].name;
+        label.classList.add('has-file');
+      } else {
+        label.textContent = '📷 Tap to take photo';
+        label.classList.remove('has-file');
+      }
+    });
+
+    document.getElementById('fixit-btn').addEventListener('click', function() {
+      if (!sessionId) return;
+      fixitCabinetId = currentCabinetId;
+      if (!isPaused) {
+        fetch('/api/build/' + sessionId + '/pause', { method: 'POST' })
+          .then(function(r) { return r.json(); })
+          .then(function() {
+            isPaused = true;
+            pausedAtMs = Date.now();
+            document.getElementById('pause-btn').textContent = 'Resume';
+            document.getElementById('pause-btn').classList.add('is-paused');
+            document.getElementById('timer-display').classList.add('paused');
+            document.getElementById('timer-status').textContent = 'Paused — FixIt';
+          });
+      } else {
+        document.getElementById('timer-status').textContent = 'Paused — FixIt';
+      }
+      fixitOverlay.classList.add('active');
+    });
+
+    document.getElementById('fixit-close').addEventListener('click', function() {
+      fixitOverlay.classList.remove('active');
+    });
+
+    document.getElementById('fixit-submit').addEventListener('click', function() {
+      var btn = document.getElementById('fixit-submit');
+      btn.disabled = true;
+      btn.textContent = 'Submitting...';
+
+      var formData = new FormData();
+      formData.append('cabinet_id', fixitCabinetId);
+      formData.append('build_session_id', sessionId);
+      formData.append('root_cause', fixitSelectedCause);
+      formData.append('description', document.getElementById('fixit-desc').value);
+      var photoFile = document.getElementById('fixit-photo').files[0];
+      if (photoFile) formData.append('photo', photoFile);
+
+      fetch('/api/fixit', { method: 'POST', body: formData })
+        .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+        .then(function(r) {
+          if (r.ok) {
+            document.getElementById('fixit-result').innerHTML = '<div class="fixit-sent">FixIt submitted ✓</div>';
+            setTimeout(function() { fixitOverlay.classList.remove('active'); }, 1500);
+            fixitSelectedCause = null;
+            document.querySelectorAll('.cause-btn').forEach(function(b) { b.classList.remove('selected'); });
+            document.getElementById('fixit-desc').value = '';
+            document.getElementById('fixit-photo').value = '';
+            document.getElementById('photo-label').textContent = '📷 Tap to take photo';
+            document.getElementById('photo-label').classList.remove('has-file');
+            document.getElementById('fixit-result').innerHTML = '';
+            btn.textContent = 'Submit FixIt';
+          } else {
+            document.getElementById('fixit-result').innerHTML = '<div style="color:var(--error)">' + (r.data.error || 'Failed') + '</div>';
+            btn.disabled = false;
+            btn.textContent = 'Submit FixIt';
+          }
+        });
+    });
+  `, user, "/workbench");
+}
+
+// ─── FixIt Dashboard ─────────────────────────────────────
+
+export function fixitPage(config: TenantConfig, user: SessionUser): string {
+  const isLead = (["lead", "supervisor", "admin"] as UserRole[]).includes(user.role);
+  return page("FixIt", `
+    main { flex: 1; padding: 16px; max-width: 900px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+    .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .controls select { width: auto; padding: 8px 12px; font-size: 0.85rem; }
+    .controls .label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .fixit-count { font-size: 0.85rem; color: var(--muted); }
+    .fixit-list { display: flex; flex-direction: column; gap: 12px; }
+    .fixit-card {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+      padding: 14px; display: flex; flex-direction: column; gap: 10px;
+    }
+    .fixit-card.has-photo { border-left: 3px solid var(--accent); }
+    .fixit-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+    .fixit-cause { display: inline-block; padding: 3px 8px; border-radius: 6px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; }
+    .cause-cnc_error { background: rgba(239,68,68,0.2); color: var(--error); }
+    .cause-material_defect { background: rgba(245,158,11,0.2); color: var(--warning, #f59e0b); }
+    .cause-transit_damage { background: rgba(59,130,246,0.2); color: var(--accent); }
+    .cause-other { background: rgba(148,163,184,0.2); color: var(--muted); }
+    .fixit-cab { font-weight: 700; font-size: 1rem; }
+    .fixit-job { font-size: 0.8rem; color: var(--muted); }
+    .fixit-desc { font-size: 0.85rem; color: var(--text); white-space: pre-line; }
+    .fixit-photo-thumb { max-width: 100%; max-height: 200px; border-radius: 8px; cursor: pointer; }
+    .fixit-meta { font-size: 0.75rem; color: var(--muted); display: flex; justify-content: space-between; }
+    .fixit-resolve-btn { padding: 8px 16px; font-size: 0.85rem; font-weight: 600; border: none; border-radius: var(--radius); background: var(--success); color: #fff; cursor: pointer; align-self: flex-start; }
+    .fixit-resolve-btn:disabled { opacity: 0.5; }
+    .resolve-form { display: flex; gap: 8px; align-items: center; }
+    .resolve-form input { flex: 1; padding: 8px; font-size: 0.85rem; }
+    .resolved-badge { display: inline-block; padding: 3px 8px; border-radius: 6px; font-size: 0.7rem; font-weight: 700; background: rgba(34,197,94,0.2); color: var(--success); }
+    .empty-state { text-align: center; padding: 3rem 1rem; color: var(--muted); }
+    .photo-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 300; display: none; align-items: center; justify-content: center; cursor: pointer; }
+    .photo-modal.active { display: flex; }
+    .photo-modal img { max-width: 95vw; max-height: 90vh; border-radius: 4px; }
+  `, `
+  <main>
+    <div class="controls">
+      <span class="label">Status</span>
+      <select id="status-select">
+        <option value="open">Open</option>
+        <option value="resolved">Resolved</option>
+      </select>
+      <span class="fixit-count" id="count"></span>
+    </div>
+    <div id="fixit-list" class="fixit-list"></div>
+    <div id="empty" class="empty-state" style="display:none">No FixIt requests</div>
+  </main>
+  <div class="photo-modal" id="photo-modal"><img id="photo-modal-img" src=""></div>
+  `, `
+    var IS_LEAD = ${isLead};
+    var ROOT_CAUSE_LABELS = {};
+    var listDiv = document.getElementById('fixit-list');
+    var emptyDiv = document.getElementById('empty');
+    var countSpan = document.getElementById('count');
+    var statusSelect = document.getElementById('status-select');
+    var photoModal = document.getElementById('photo-modal');
+    var photoModalImg = document.getElementById('photo-modal-img');
+
+    function escHtml(s) { return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
+
+    function fmtDate(d) {
+      if (!d) return '';
+      var dt = new Date(d + 'Z');
+      return dt.toLocaleDateString() + ' ' + dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function load() {
+      var status = statusSelect.value;
+      fetch('/api/fixit?status=' + status)
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          ROOT_CAUSE_LABELS = data.root_cause_labels || {};
+          var reqs = data.requests || [];
+          countSpan.textContent = reqs.length + ' request' + (reqs.length !== 1 ? 's' : '');
+
+          if (reqs.length === 0) {
+            listDiv.innerHTML = '';
+            emptyDiv.style.display = 'block';
+            return;
+          }
+          emptyDiv.style.display = 'none';
+
+          listDiv.innerHTML = reqs.map(function(r) {
+            var causeLabel = ROOT_CAUSE_LABELS[r.root_cause] || r.root_cause;
+            var causeClass = 'cause-' + r.root_cause;
+            var photoHtml = r.photo_key
+              ? '<img class="fixit-photo-thumb" data-id="' + r.id + '" src="/api/fixit/' + r.id + '/photo" alt="Photo">'
+              : '';
+            var descHtml = r.description ? '<div class="fixit-desc">' + escHtml(r.description) + '</div>' : '';
+
+            var actionHtml = '';
+            if (r.status === 'open' && IS_LEAD) {
+              actionHtml = '<div class="resolve-form">'
+                + '<input type="text" class="input resolve-note" data-id="' + r.id + '" placeholder="Resolution note (optional)">'
+                + '<button class="fixit-resolve-btn" data-id="' + r.id + '">Resolve</button>'
+                + '</div>';
+            }
+            if (r.status === 'resolved') {
+              actionHtml = '<div><span class="resolved-badge">Resolved</span> '
+                + '<span style="font-size:0.75rem;color:var(--muted)">'
+                + (r.resolved_by_name || '') + ' — ' + fmtDate(r.resolved_at)
+                + (r.resolution_note ? ' — ' + escHtml(r.resolution_note) : '')
+                + '</span></div>';
+            }
+
+            return '<div class="fixit-card' + (r.photo_key ? ' has-photo' : '') + '">'
+              + '<div class="fixit-header">'
+              +   '<div><span class="fixit-cab">${config.entity_labels.l3} #' + r.cabinet_number + (r.cabinet_label ? ' — ' + escHtml(r.cabinet_label) : '') + '</span></div>'
+              +   '<span class="fixit-cause ' + causeClass + '">' + causeLabel + '</span>'
+              + '</div>'
+              + '<div class="fixit-job">' + r.job_number + ' — ' + escHtml(r.job_name) + '</div>'
+              + descHtml
+              + photoHtml
+              + '<div class="fixit-meta"><span>By ' + escHtml(r.requested_by_name) + '</span><span>' + fmtDate(r.created_at) + '</span></div>'
+              + actionHtml
+              + '</div>';
+          }).join('');
+
+          listDiv.querySelectorAll('.fixit-resolve-btn').forEach(function(btn) {
+            btn.addEventListener('click', function() {
+              var id = btn.dataset.id;
+              var noteInput = listDiv.querySelector('.resolve-note[data-id="' + id + '"]');
+              btn.disabled = true;
+              btn.textContent = 'Resolving...';
+              fetch('/api/fixit/' + id + '/resolve', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ resolution_note: noteInput ? noteInput.value : '' }),
+              }).then(function(r) { return r.json(); }).then(function(d) {
+                if (d.ok) load();
+                else { btn.disabled = false; btn.textContent = 'Resolve'; }
+              });
+            });
+          });
+
+          listDiv.querySelectorAll('.fixit-photo-thumb').forEach(function(img) {
+            img.addEventListener('click', function() {
+              photoModalImg.src = img.src;
+              photoModal.classList.add('active');
+            });
+          });
+        });
+    }
+
+    photoModal.addEventListener('click', function() { photoModal.classList.remove('active'); });
+    statusSelect.addEventListener('change', load);
+    load();
+  `, user, "/fixit");
 }
