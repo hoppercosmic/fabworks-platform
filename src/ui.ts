@@ -179,17 +179,24 @@ const SHARED_STYLES = `
     .pill-purple { background: rgba(168,85,247,0.15); color: var(--purple); }
     .qr-fab {
       position: fixed; z-index: 180; right: 20px; bottom: 80px;
-      width: 56px; height: 56px; border-radius: 50%;
-      background: var(--accent); color: white; border: none; cursor: grab;
-      display: flex; align-items: center; justify-content: center;
+      border-radius: 28px; background: var(--surface); border: 1px solid var(--border);
+      display: flex; flex-direction: column; overflow: hidden; cursor: grab;
       box-shadow: 0 4px 16px rgba(0,0,0,0.4);
       -webkit-tap-highlight-color: transparent;
       touch-action: none;
-      transition: transform 0.15s, box-shadow 0.15s;
+      transition: box-shadow 0.15s;
     }
-    .qr-fab:active { transform: scale(0.95); }
-    .qr-fab.dragging { cursor: grabbing; box-shadow: 0 8px 24px rgba(0,0,0,0.5); transform: scale(1.08); }
-    .qr-fab svg { width: 28px; height: 28px; }
+    .qr-fab.dragging { cursor: grabbing; box-shadow: 0 8px 24px rgba(0,0,0,0.5); }
+    .fab-btn {
+      width: 52px; height: 48px; border: none; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      color: white; -webkit-tap-highlight-color: transparent;
+      transition: background 0.15s;
+    }
+    .fab-btn:active { opacity: 0.8; }
+    .fab-btn svg { width: 24px; height: 24px; }
+    .fab-scan { background: var(--accent); }
+    .fab-show { background: var(--purple); border-top: 1px solid rgba(255,255,255,0.15); }
     .scanner-overlay {
       position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 200;
       display: none; flex-direction: column; align-items: center; justify-content: center;
@@ -238,10 +245,10 @@ const USER_MENU_JS = `
       fab.style.right = pos.right + 'px';
       fab.style.bottom = pos.bottom + 'px';
 
-      var dragging = false, startX = 0, startY = 0, startRight = 0, startBottom = 0, moved = false;
+      var dragging = false, startX = 0, startY = 0, startRight = 0, startBottom = 0, moved = false, tapTarget = null;
 
-      function onStart(cx, cy) {
-        dragging = true; moved = false;
+      function onStart(cx, cy, target) {
+        dragging = true; moved = false; tapTarget = target;
         startX = cx; startY = cy;
         startRight = parseInt(fab.style.right) || pos.right;
         startBottom = parseInt(fab.style.bottom) || pos.bottom;
@@ -252,8 +259,8 @@ const USER_MENU_JS = `
         var dx = startX - cx, dy = startY - cy;
         if (!moved && Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
         moved = true;
-        var r = Math.max(0, Math.min(window.innerWidth - 56, startRight + dx));
-        var b = Math.max(0, Math.min(window.innerHeight - 56, startBottom + dy));
+        var r = Math.max(0, Math.min(window.innerWidth - 52, startRight + dx));
+        var b = Math.max(0, Math.min(window.innerHeight - 96, startBottom + dy));
         fab.style.right = r + 'px'; fab.style.bottom = b + 'px';
       }
       function onEnd() {
@@ -263,16 +270,50 @@ const USER_MENU_JS = `
           pos = { right: parseInt(fab.style.right), bottom: parseInt(fab.style.bottom) };
           localStorage.setItem('fw_fab_pos', JSON.stringify(pos));
         } else {
-          openGlobalScanner();
+          var btn = tapTarget && tapTarget.closest ? tapTarget.closest('.fab-btn') : null;
+          if (btn && btn.id === 'fab-show-btn') { showPageQR(); }
+          else { openGlobalScanner(); }
         }
       }
 
-      fab.addEventListener('touchstart', function(e) { e.preventDefault(); var t = e.touches[0]; onStart(t.clientX, t.clientY); }, { passive: false });
+      fab.addEventListener('touchstart', function(e) { e.preventDefault(); var t = e.touches[0]; onStart(t.clientX, t.clientY, e.target); }, { passive: false });
       document.addEventListener('touchmove', function(e) { if (dragging) { e.preventDefault(); var t = e.touches[0]; onMove(t.clientX, t.clientY); } }, { passive: false });
       document.addEventListener('touchend', onEnd);
-      fab.addEventListener('mousedown', function(e) { e.preventDefault(); onStart(e.clientX, e.clientY); });
+      fab.addEventListener('mousedown', function(e) { e.preventDefault(); onStart(e.clientX, e.clientY, e.target); });
       document.addEventListener('mousemove', function(e) { onMove(e.clientX, e.clientY); });
       document.addEventListener('mouseup', onEnd);
+
+      // --- Show QR for current page ---
+      var fabSpot = document.getElementById('fab-spotlight');
+      var fabSpotCanvas = document.getElementById('fab-spot-canvas');
+      var fabSpotTitle = document.getElementById('fab-spot-title');
+      var fabSpotSub = document.getElementById('fab-spot-sub');
+      fabSpot.addEventListener('click', function() { fabSpot.style.display = 'none'; });
+
+      function showPageQR() {
+        var path = window.location.pathname;
+        var code = 'fw:page:' + path;
+        var title = document.title.replace('FabWorks — ', '');
+        var pathParts = path.split('/').filter(Boolean);
+        if (pathParts[0] === 'stations' && pathParts[1]) code = 'fw:sta:' + pathParts[1];
+        else if (pathParts[0] === 'jobs' && pathParts[1]) code = 'fw:l1:' + pathParts[1] + ':' + title;
+
+        var s = document.createElement('script');
+        function doRender() {
+          fabSpotTitle.textContent = title;
+          fabSpotSub.textContent = code;
+          QRCode.toDataURL(code, { width: 600, margin: 2 }, function(err, url) {
+            fabSpotCanvas.src = url;
+            fabSpotCanvas.style.width = 'min(80vw, 300px)';
+            fabSpotCanvas.style.height = 'min(80vw, 300px)';
+            fabSpot.style.display = 'flex';
+          });
+        }
+        if (typeof QRCode !== 'undefined') { doRender(); return; }
+        s.src = 'https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js';
+        s.onload = doRender;
+        document.head.appendChild(s);
+      }
 
       // --- Global Scanner ---
       var overlay = document.getElementById('scanner-overlay');
@@ -331,17 +372,32 @@ const USER_MENU_JS = `
 function page(title: string, extraStyles: string, body: string, script: string, user: SessionUser | null, currentPath: string, cdnScripts: string[] = []): string {
   const cdnTags = cdnScripts.map((src) => `<script src="${src}"></script>`).join("\n  ");
   const scannerHtml = user ? `
-  <button class="qr-fab" id="qr-fab" title="Scan QR code">
-    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/>
-      <path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
-      <line x1="7" y1="12" x2="17" y2="12"/><line x1="12" y1="7" x2="12" y2="17"/>
-    </svg>
-  </button>
+  <div class="qr-fab" id="qr-fab">
+    <button class="fab-btn fab-scan" id="fab-scan-btn" title="Scan QR code">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+        <path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
+        <line x1="7" y1="12" x2="17" y2="12"/><line x1="12" y1="7" x2="12" y2="17"/>
+      </svg>
+    </button>
+    <button class="fab-btn fab-show" id="fab-show-btn" title="Show QR for this page">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+        <rect x="3" y="14" width="7" height="7"/><rect x="14" y="17" width="4" height="4"/>
+        <line x1="14" y1="14" x2="21" y2="14"/><line x1="21" y1="14" x2="21" y2="21"/>
+      </svg>
+    </button>
+  </div>
   <div class="scanner-overlay" id="scanner-overlay">
     <button class="scanner-close" id="scanner-close">&times;</button>
     <div id="qr-reader"></div>
     <div class="scanner-status" id="scanner-status">Point camera at a FabWorks QR code</div>
+  </div>
+  <div class="qr-spotlight" id="fab-spotlight" style="display:none;position:fixed;inset:0;background:white;z-index:250;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;padding:20px;">
+    <img id="fab-spot-canvas" alt="QR Code" />
+    <div style="font-size:1.4rem;font-weight:700;color:#111;margin-top:16px" id="fab-spot-title"></div>
+    <div style="font-size:0.9rem;color:#666;margin-top:4px" id="fab-spot-sub"></div>
+    <div style="font-size:0.75rem;color:#999;margin-top:24px">Tap anywhere to close</div>
   </div>` : "";
   const navHtml = user ? `
   <div class="top-bar">
@@ -1101,7 +1157,7 @@ export function jobDetailPage(config: TenantConfig, user: SessionUser): string {
       background: white; color: #111; border-radius: 8px; padding: 12px;
       text-align: center; display: flex; flex-direction: column; align-items: center; gap: 6px;
     }
-    .qr-label canvas { max-width: 120px; }
+    .qr-label canvas, .qr-label img { display: block; width: 120px; height: 120px; }
     .qr-label .qr-title { font-weight: 700; font-size: 0.85rem; }
     .qr-label .qr-sub { font-size: 0.7rem; color: #666; }
     #labels-panel { display: none; }
@@ -1354,9 +1410,11 @@ export function jobDetailPage(config: TenantConfig, user: SessionUser): string {
       function makeLabel(text, title, subtitle) {
         var div = document.createElement('div');
         div.className = 'qr-label';
-        var canvas = document.createElement('canvas');
-        QRCode.toCanvas(canvas, text, { width: 120, margin: 1 });
-        div.appendChild(canvas);
+        QRCode.toDataURL(text, { width: 240, margin: 1 }, function(err, url) {
+          var img = document.createElement('img');
+          img.src = url; img.width = 120; img.height = 120;
+          div.insertBefore(img, div.firstChild);
+        });
         var t = document.createElement('div');
         t.className = 'qr-title';
         t.textContent = title;
@@ -1394,9 +1452,11 @@ export function jobDetailPage(config: TenantConfig, user: SessionUser): string {
       STATIONS.forEach(function(s) {
         var div = document.createElement('div');
         div.className = 'qr-label';
-        var canvas = document.createElement('canvas');
-        QRCode.toCanvas(canvas, 'fw:sta:' + s.slug, { width: 120, margin: 1 });
-        div.appendChild(canvas);
+        QRCode.toDataURL('fw:sta:' + s.slug, { width: 240, margin: 1 }, function(err, url) {
+          var img = document.createElement('img');
+          img.src = url; img.width = 120; img.height = 120;
+          div.insertBefore(img, div.firstChild);
+        });
         var t = document.createElement('div');
         t.className = 'qr-title';
         t.textContent = s.name;
@@ -1431,7 +1491,7 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
       cursor: pointer; transition: transform 0.15s, box-shadow 0.15s;
     }
     .qr-card:active { transform: scale(0.97); }
-    .qr-card canvas { max-width: 110px; }
+    .qr-card canvas, .qr-card img { display: block; width: 110px; height: 110px; }
     .qr-card .qr-title { font-weight: 700; font-size: 0.75rem; word-break: break-word; }
     .qr-card .qr-sub { font-size: 0.65rem; color: #666; }
     .qr-section { font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted); margin-top: 4px; }
@@ -1443,13 +1503,13 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
       cursor: pointer; padding: 20px;
     }
     .qr-spotlight.active { display: flex; }
-    .qr-spotlight canvas { max-width: 300px; width: 80vw; }
+    .qr-spotlight canvas, .qr-spotlight img { width: min(80vw, 300px); height: min(80vw, 300px); }
     .qr-spotlight .spot-title { font-size: 1.4rem; font-weight: 700; color: #111; margin-top: 16px; }
     .qr-spotlight .spot-sub { font-size: 0.9rem; color: #666; margin-top: 4px; }
     .qr-spotlight .spot-hint { font-size: 0.75rem; color: #999; margin-top: 24px; }
     .qr-empty { text-align: center; padding: 48px 16px; color: var(--muted); }
     @media print {
-      .top-bar, .qr-tabs, .qr-actions, .qr-fab, .job-select-row, .qr-spotlight { display: none !important; }
+      .top-bar, .qr-tabs, .qr-actions, .qr-fab, .job-select-row, .qr-spotlight, #fab-spotlight { display: none !important; }
       body { padding-top: 0 !important; background: white !important; color: #111 !important; }
       main { padding: 8px !important; max-width: none !important; }
       .qr-grid { grid-template-columns: repeat(3, 1fr); gap: 8px; }
@@ -1463,6 +1523,7 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
       <div class="qr-tabs" id="qr-tabs">
         <button class="active" data-tab="stations">Stations</button>
         <button data-tab="job">Job Labels</button>
+        <button data-tab="system">System</button>
       </div>
     </div>
     <div id="tab-stations">
@@ -1475,11 +1536,17 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
       </div>
       <div id="job-qr-content"></div>
     </div>
+    <div id="tab-system" style="display:none">
+      <div class="qr-section">System Commands</div>
+      <div class="qr-grid" id="system-grid"></div>
+      <div class="qr-section" style="margin-top:12px">All Stations</div>
+      <div class="qr-grid" id="system-stations-grid"></div>
+    </div>
     <div class="qr-actions">
       <button class="btn btn-primary" id="print-btn" style="font-size:1rem;padding:12px">Print</button>
     </div>
     <div class="qr-spotlight" id="spotlight">
-      <canvas id="spot-canvas"></canvas>
+      <img id="spot-canvas" alt="QR Code" />
       <div class="spot-title" id="spot-title"></div>
       <div class="spot-sub" id="spot-sub"></div>
       <div class="spot-hint">Tap anywhere to close</div>
@@ -1494,6 +1561,7 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
     var tabs = document.getElementById('qr-tabs');
     var tabStations = document.getElementById('tab-stations');
     var tabJob = document.getElementById('tab-job');
+    var tabSystem = document.getElementById('tab-system');
     tabs.addEventListener('click', function(e) {
       var btn = e.target.closest('button');
       if (!btn) return;
@@ -1502,6 +1570,8 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
       btn.classList.add('active');
       tabStations.style.display = activeTab === 'stations' ? '' : 'none';
       tabJob.style.display = activeTab === 'job' ? '' : 'none';
+      tabSystem.style.display = activeTab === 'system' ? '' : 'none';
+      if (activeTab === 'system' && !systemRendered) renderSystem();
     });
 
     // --- Spotlight (full-screen QR for device-to-device scanning) ---
@@ -1511,7 +1581,8 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
     var spotSub = document.getElementById('spot-sub');
 
     function showSpotlight(code, title, sub) {
-      QRCode.toCanvas(spotCanvas, code, { width: 600, margin: 2 }, function() {
+      QRCode.toDataURL(code, { width: 600, margin: 2 }, function(err, url) {
+        spotCanvas.src = url;
         spotTitle.textContent = title;
         spotSub.textContent = sub || '';
         spotlight.classList.add('active');
@@ -1520,16 +1591,24 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
     spotlight.addEventListener('click', function() { spotlight.classList.remove('active'); });
 
     // --- Station QR grid ---
+    function makeQRImg(code, size, cb) {
+      QRCode.toDataURL(code, { width: size, margin: 1 }, function(err, url) {
+        var img = document.createElement('img');
+        img.src = url;
+        img.width = size;
+        img.height = size;
+        if (cb) cb(img);
+      });
+    }
+
     function renderStations() {
       var grid = document.getElementById('station-grid');
       grid.innerHTML = '';
       STATIONS.forEach(function(s) {
         var card = document.createElement('div');
         card.className = 'qr-card';
-        var canvas = document.createElement('canvas');
         var code = 'fw:sta:' + s.slug;
-        QRCode.toCanvas(canvas, code, { width: 220, margin: 1 });
-        card.appendChild(canvas);
+        makeQRImg(code, 220, function(img) { card.insertBefore(img, card.firstChild); });
         var t = document.createElement('div');
         t.className = 'qr-title';
         t.textContent = s.name;
@@ -1568,7 +1647,7 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
     function renderJobQR(job) {
       var html = '<div class="qr-section" style="margin-top:8px">' + LABELS.l1 + '</div><div class="qr-grid">';
       html += '<div class="qr-card" data-code="fw:l1:' + job.id + ':' + job.job_number + '" data-title="' + escHtml(job.job_number + ' ' + job.job_name) + '" data-sub="' + LABELS.l1 + '">';
-      html += '<canvas id="qr-job-' + job.id + '"></canvas>';
+      html += '<img id="qr-job-' + job.id + '" width="220" height="220" alt="QR" />';
       html += '<div class="qr-title">' + escHtml(job.job_number + ' ' + job.job_name) + '</div>';
       html += '<div class="qr-sub">' + LABELS.l1 + '</div></div></div>';
 
@@ -1576,7 +1655,7 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
         html += '<div class="qr-section">' + LABELS.l2 + 's</div><div class="qr-grid">';
         job.buckets.forEach(function(b) {
           html += '<div class="qr-card" data-code="fw:l2:' + b.id + ':' + b.name + '" data-title="' + escHtml(b.name) + '" data-sub="' + LABELS.l2 + ' — ' + job.job_number + '">';
-          html += '<canvas id="qr-bucket-' + b.id + '"></canvas>';
+          html += '<img id="qr-bucket-' + b.id + '" width="220" height="220" alt="QR" />';
           html += '<div class="qr-title">' + escHtml(b.name) + '</div>';
           html += '<div class="qr-sub">' + LABELS.l2 + ' — ' + job.job_number + '</div></div>';
         });
@@ -1588,7 +1667,7 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
         job.cabinets.forEach(function(c) {
           var label = c.label || (LABELS.l3 + ' ' + c.cabinet_number);
           html += '<div class="qr-card" data-code="fw:l3:' + c.id + ':' + label + '" data-title="' + escHtml(label) + '" data-sub="' + LABELS.l3 + ' #' + c.cabinet_number + ' — ' + job.job_number + '">';
-          html += '<canvas id="qr-cab-' + c.id + '"></canvas>';
+          html += '<img id="qr-cab-' + c.id + '" width="220" height="220" alt="QR" />';
           html += '<div class="qr-title">#' + c.cabinet_number + '</div>';
           html += '<div class="qr-sub">' + escHtml(label) + '</div></div>';
         });
@@ -1597,14 +1676,14 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
 
       jobContent.innerHTML = html;
 
-      // Render QR canvases
-      QRCode.toCanvas(document.getElementById('qr-job-' + job.id), 'fw:l1:' + job.id + ':' + job.job_number, { width: 220, margin: 1 });
+      // Render QR images
+      QRCode.toDataURL('fw:l1:' + job.id + ':' + job.job_number, { width: 220, margin: 1 }, function(e, u) { document.getElementById('qr-job-' + job.id).src = u; });
       job.buckets.forEach(function(b) {
-        QRCode.toCanvas(document.getElementById('qr-bucket-' + b.id), 'fw:l2:' + b.id + ':' + b.name, { width: 220, margin: 1 });
+        QRCode.toDataURL('fw:l2:' + b.id + ':' + b.name, { width: 220, margin: 1 }, function(e, u) { document.getElementById('qr-bucket-' + b.id).src = u; });
       });
       job.cabinets.forEach(function(c) {
         var label = c.label || (LABELS.l3 + ' ' + c.cabinet_number);
-        QRCode.toCanvas(document.getElementById('qr-cab-' + c.id), 'fw:l3:' + c.id + ':' + label, { width: 220, margin: 1 });
+        QRCode.toDataURL('fw:l3:' + c.id + ':' + label, { width: 220, margin: 1 }, function(e, u) { document.getElementById('qr-cab-' + c.id).src = u; });
       });
 
       // Click-to-spotlight
@@ -1616,6 +1695,57 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
     }
 
     function escHtml(s) { return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
+
+    // --- System tab ---
+    var systemRendered = false;
+    var SYSTEM_CODES = [
+      { code: 'fw:cmd:ask', title: 'Ask System', sub: 'Prompt a question to the system' },
+      { code: 'fw:cmd:status', title: 'Status Check', sub: 'Show current system status' },
+      { code: 'fw:cmd:whoami', title: 'Who Am I', sub: 'Show current user info' },
+      { code: 'fw:cmd:clock-in', title: 'Clock In', sub: 'Start shift / log arrival' },
+      { code: 'fw:cmd:clock-out', title: 'Clock Out', sub: 'End shift / log departure' },
+      { code: 'fw:cmd:break', title: 'Break', sub: 'Start / end break' },
+    ];
+
+    function renderSystem() {
+      systemRendered = true;
+      var sysGrid = document.getElementById('system-grid');
+      sysGrid.innerHTML = '';
+      SYSTEM_CODES.forEach(function(item) {
+        var card = document.createElement('div');
+        card.className = 'qr-card';
+        makeQRImg(item.code, 220, function(img) { card.insertBefore(img, card.firstChild); });
+        var t = document.createElement('div');
+        t.className = 'qr-title';
+        t.textContent = item.title;
+        card.appendChild(t);
+        var sub = document.createElement('div');
+        sub.className = 'qr-sub';
+        sub.textContent = item.sub;
+        card.appendChild(sub);
+        card.addEventListener('click', function() { showSpotlight(item.code, item.title, item.sub); });
+        sysGrid.appendChild(card);
+      });
+
+      var staGrid = document.getElementById('system-stations-grid');
+      staGrid.innerHTML = '';
+      STATIONS.forEach(function(s) {
+        var card = document.createElement('div');
+        card.className = 'qr-card';
+        var code = 'fw:sta:' + s.slug;
+        makeQRImg(code, 220, function(img) { card.insertBefore(img, card.firstChild); });
+        var t = document.createElement('div');
+        t.className = 'qr-title';
+        t.textContent = s.name;
+        card.appendChild(t);
+        var sub = document.createElement('div');
+        sub.className = 'qr-sub';
+        sub.textContent = s.level.toUpperCase() + ' — ' + s.slug;
+        card.appendChild(sub);
+        card.addEventListener('click', function() { showSpotlight(code, s.name, s.level.toUpperCase() + ' Station'); });
+        staGrid.appendChild(card);
+      });
+    }
 
     // --- Print ---
     document.getElementById('print-btn').addEventListener('click', function() {
@@ -2079,8 +2209,8 @@ export function stationViewPage(config: TenantConfig, user: SessionUser): string
         var metaLine = '';
         if (item.cab.accessories || item.cab.notes || item.cab.assembly_sheet_url) {
           var parts = [];
-          if (item.cab.accessories) parts.push(item.cab.accessories.replace(/\n/g, ', ').replace(/</g,'&lt;'));
-          if (item.cab.notes) parts.push(item.cab.notes.replace(/\n/g, ', ').replace(/</g,'&lt;'));
+          if (item.cab.accessories) parts.push(item.cab.accessories.split('\\n').join(', ').replace(/</g,'&lt;'));
+          if (item.cab.notes) parts.push(item.cab.notes.split('\\n').join(', ').replace(/</g,'&lt;'));
           if (item.cab.assembly_sheet_url) parts.push('<a href="' + item.cab.assembly_sheet_url.replace(/"/g,'&quot;') + '" target="_blank" rel="noopener" style="color:var(--accent);font-size:0.7rem">Sheet ↗</a>');
           metaLine = '<div style="font-size:0.7rem;color:var(--muted);margin-top:2px">' + parts.join(' · ') + '</div>';
         }
@@ -2182,8 +2312,8 @@ export function stationViewPage(config: TenantConfig, user: SessionUser): string
               var meta = '';
               if (cab.accessories || cab.notes || cab.assembly_sheet_url) {
                 meta = '<div style="padding:4px 14px 10px;font-size:0.75rem;color:var(--muted)">';
-                if (cab.accessories) meta += '<div><strong>Accessories:</strong> ' + cab.accessories.replace(/\n/g, ', ').replace(/</g,'&lt;') + '</div>';
-                if (cab.notes) meta += '<div><strong>Notes:</strong> ' + cab.notes.replace(/\n/g, ', ').replace(/</g,'&lt;') + '</div>';
+                if (cab.accessories) meta += '<div><strong>Accessories:</strong> ' + cab.accessories.split('\\n').join(', ').replace(/</g,'&lt;') + '</div>';
+                if (cab.notes) meta += '<div><strong>Notes:</strong> ' + cab.notes.split('\\n').join(', ').replace(/</g,'&lt;') + '</div>';
                 if (cab.assembly_sheet_url) meta += '<div><a href="' + cab.assembly_sheet_url.replace(/"/g,'&quot;') + '" target="_blank" rel="noopener" style="color:var(--accent)">Assembly Sheet ↗</a></div>';
                 meta += '</div>';
               }

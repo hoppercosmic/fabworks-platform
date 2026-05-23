@@ -3,6 +3,7 @@
   "name": "fabworks",
   "main": "src/index.ts",
   "compatibility_date": "2025-05-01",
+  "workers_dev": true,
   "d1_databases": [
     {
       "binding": "DB",
@@ -15,5 +16,9 @@
       "binding": "PHOTOS",
       "bucket_name": "fabworks-photos"
     }
+  ],
+  "routes": [
+    { "pattern": "shop.fabworks.app", "zone_name": "fabworks.app" },
+    { "pattern": "shop.fabworks.app/*", "zone_name": "fabworks.app" }
   ]
 }
