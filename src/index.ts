@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage, workbenchPage, fixitPage, myWorkbenchPage } from "./ui";
+import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage, workbenchPage, fixitPage, myWorkbenchPage, qrPage } from "./ui";
 
 // --- Types ---
 
@@ -1454,6 +1454,7 @@ app.get("/dashboard", requireAuth(), (c) => c.html(dashboardPage(c.get("config")
 app.get("/job/:id", requireAuth(), (c) => c.html(jobDetailPage(c.get("config"), c.get("user")!)));
 app.get("/stations", requireAuth(), (c) => c.html(stationViewPage(c.get("config"), c.get("user")!)));
 app.get("/job/:id/progress", requireAuth(), (c) => c.html(progressPage(c.get("config"), c.get("user")!)));
+app.get("/qr", requireAuth("lead"), (c) => c.html(qrPage(c.get("config"), c.get("user")!)));
 app.get("/kpi", requireAuth("lead"), (c) => c.html(kpiPage(c.get("config"), c.get("user")!)));
 app.get("/takt", requireAuth("lead"), (c) => c.html(taktPage(c.get("config"), c.get("user")!)));
 app.get("/admin", requireAuth("admin"), (c) => c.html(adminPage(c.get("config"), c.get("user")!)));
