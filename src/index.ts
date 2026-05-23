@@ -132,8 +132,9 @@ function generateSessionId(): string {
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 }
 
+const PIN_SALT = "fw_fabworks_2026";
 async function hashPin(pin: string): Promise<string> {
-  const data = new TextEncoder().encode(pin);
+  const data = new TextEncoder().encode(PIN_SALT + pin);
   const hash = await crypto.subtle.digest("SHA-256", data);
   return Array.from(new Uint8Array(hash), (b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -1430,6 +1431,37 @@ app.get("/api/fixit/:id/photo", requireAuth(), async (c) => {
     return c.json({ error: "Photo storage unavailable" }, 503);
   }
 });
+
+// --- PWA ---
+
+const PWA_MANIFEST = JSON.stringify({
+  name: "FabWorks",
+  short_name: "FabWorks",
+  description: "Shop Floor Tracker",
+  start_url: "/",
+  display: "standalone",
+  background_color: "#0f172a",
+  theme_color: "#0f172a",
+  icons: [
+    { src: "/icon-192.svg", sizes: "192x192", type: "image/svg+xml" },
+    { src: "/icon-512.svg", sizes: "512x512", type: "image/svg+xml" },
+  ],
+});
+
+const PWA_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#1e293b"/>
+  <rect x="24" y="24" width="464" height="464" rx="80" fill="#0f172a" stroke="#334155" stroke-width="4"/>
+  <text x="256" y="290" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,sans-serif" font-size="200" font-weight="800" fill="#3b82f6">FW</text>
+  <rect x="120" y="340" width="272" height="6" rx="3" fill="#334155"/>
+  <rect x="120" y="340" width="180" height="6" rx="3" fill="#3b82f6"/>
+</svg>`;
+
+app.get("/manifest.json", (c) => {
+  return c.body(PWA_MANIFEST, 200, { "Content-Type": "application/manifest+json" });
+});
+
+app.get("/icon-192.svg", (c) => c.body(PWA_ICON, 200, { "Content-Type": "image/svg+xml" }));
+app.get("/icon-512.svg", (c) => c.body(PWA_ICON, 200, { "Content-Type": "image/svg+xml" }));
 
 // --- Pages ---
 
