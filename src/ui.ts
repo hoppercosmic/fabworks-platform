@@ -218,7 +218,7 @@ const USER_MENU_JS = `
       var active = document.querySelector('.nav-item.active');
       if (nav && active) {
         var offset = active.offsetLeft - (nav.offsetWidth / 2) + (active.offsetWidth / 2);
-        nav.scrollTo({ left: Math.max(0, offset), behavior: 'smooth' });
+        nav.scrollTo({ left: Math.max(0, offset), behavior: 'instant' });
       }
     })();
 
