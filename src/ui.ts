@@ -21,7 +21,7 @@ const NAV_ITEMS: NavItem[] = [
   { path: "/workbench",  label: "Build",     icon: SVG_WRENCH, minRole: "user" },
   { path: "/jobs/new",   label: "New Job",   icon: SVG_PLUS,  minRole: "admin" },
   { path: "/dashboard",  label: "Dash",      icon: SVG_CHART, minRole: "user" },
-  { path: "/stations",   label: "Stage",     icon: SVG_GRID,  minRole: "user" },
+  { path: "/stations",   label: "Stations",  icon: SVG_GRID,  minRole: "user" },
   { path: "/fixit",      label: "FixIt",     icon: SVG_ALERT, minRole: "user" },
   { path: "/kpi",        label: "KPI",       icon: SVG_TREND, minRole: "lead" },
   { path: "/takt",       label: "Takt",      icon: SVG_CLOCK, minRole: "lead" },
@@ -176,7 +176,7 @@ const SHARED_STYLES = `
     .pill-yellow { background: rgba(245,158,11,0.15); color: var(--warning); }
     .pill-purple { background: rgba(168,85,247,0.15); color: var(--purple); }
     .qr-fab {
-      position: fixed; z-index: 180;
+      position: fixed; z-index: 180; right: 20px; bottom: 80px;
       width: 56px; height: 56px; border-radius: 50%;
       background: var(--accent); color: white; border: none; cursor: grab;
       display: flex; align-items: center; justify-content: center;
