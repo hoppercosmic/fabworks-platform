@@ -62,47 +62,45 @@ const SHARED_STYLES = `
       min-height: 100dvh;
       display: flex;
       flex-direction: column;
-      padding-top: calc(var(--nav-h) + 44px);
+      padding-top: var(--nav-h);
     }
-    .top-nav {
+    .top-bar {
       position: fixed; top: 0; left: 0; right: 0; z-index: 100;
       background: var(--surface);
       border-bottom: 1px solid var(--border);
-      display: flex;
+      display: flex; align-items: center;
+      padding-top: env(safe-area-inset-top);
+      height: var(--nav-h);
+    }
+    .top-bar-title {
+      flex-shrink: 0; padding: 0 12px; font-size: 0.85rem; font-weight: 700;
+      color: var(--text); white-space: nowrap;
+    }
+    .top-nav {
+      flex: 1; display: flex;
       overflow-x: auto;
       -webkit-overflow-scrolling: touch;
       scrollbar-width: none;
-      padding: 0 4px;
-      padding-top: env(safe-area-inset-top);
-      height: var(--nav-h);
+      padding: 0 2px;
     }
     .top-nav::-webkit-scrollbar { display: none; }
     .nav-item {
       display: flex; flex-direction: column; align-items: center; justify-content: center;
-      min-width: 64px; padding: 6px 12px 4px;
+      min-width: 52px; padding: 6px 8px 4px;
       color: var(--muted); text-decoration: none; flex-shrink: 0;
       -webkit-tap-highlight-color: transparent; transition: color 0.15s;
     }
     .nav-item.active { color: var(--accent); }
-    .nav-icon { width: 24px; height: 24px; }
-    .nav-icon svg { width: 24px; height: 24px; }
-    .nav-label { font-size: 0.6rem; font-weight: 600; margin-top: 2px; letter-spacing: 0.02em; }
-    .page-header {
-      position: fixed; top: var(--nav-h); left: 0; right: 0; z-index: 99;
-      background: var(--bg);
-      border-bottom: 1px solid var(--border);
-      padding: 8px 16px;
-      display: flex; align-items: center; justify-content: space-between;
-      height: 44px;
-    }
-    .page-header h1 { font-size: 1.1rem; font-weight: 700; }
+    .nav-icon { width: 22px; height: 22px; }
+    .nav-icon svg { width: 22px; height: 22px; }
+    .nav-label { font-size: 0.55rem; font-weight: 600; margin-top: 1px; letter-spacing: 0.02em; }
     .user-avatar {
-      width: 36px; height: 36px; border-radius: 50%;
+      width: 32px; height: 32px; border-radius: 50%;
       background: var(--accent); color: white;
-      font-weight: 700; font-size: 0.9rem; border: none; cursor: pointer;
+      font-weight: 700; font-size: 0.8rem; border: none; cursor: pointer;
       display: flex; align-items: center; justify-content: center;
     }
-    .user-menu { position: relative; }
+    .user-menu { position: relative; flex-shrink: 0; padding: 0 10px; }
     .user-dropdown {
       display: none; position: absolute; right: 0; top: 100%; margin-top: 4px;
       background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
@@ -345,9 +343,9 @@ function page(title: string, extraStyles: string, body: string, script: string, 
     <div class="scanner-status" id="scanner-status">Point camera at a FabWorks QR code</div>
   </div>` : "";
   const navHtml = user ? `
-  <nav class="top-nav">${renderNav(currentPath, user)}</nav>
-  <div class="page-header">
-    <h1>${title}</h1>
+  <div class="top-bar">
+    <div class="top-bar-title">${title}</div>
+    <nav class="top-nav">${renderNav(currentPath, user)}</nav>
     <div class="user-menu">
       <button class="user-avatar" id="user-avatar-btn">${user.name.charAt(0).toUpperCase()}</button>
       <div class="user-dropdown" id="user-dropdown">
@@ -476,22 +474,22 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
   const L2 = config.entity_labels.l2;
   const L3 = config.entity_labels.l3;
   return page("FabWorks", `
-    main { flex: 1; padding: 16px; max-width: 480px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+    main { flex: 1; padding: 10px 16px 16px; max-width: 480px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
     #active-build-banner { background: rgba(245,158,11,0.15); border: 1px solid var(--warning, #f59e0b); color: var(--warning, #f59e0b); cursor: pointer; font-weight: 600; font-size: 0.9rem; text-align: center; padding: 10px; }
     .station-carousel { display: flex; align-items: center; justify-content: center; gap: 0; user-select: none; }
     .station-prev, .station-next {
-      flex: 1; font-size: 0.8rem; color: var(--muted); opacity: 0.4; cursor: pointer;
-      padding: 10px 8px; transition: opacity 0.2s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      flex: 1; font-size: 0.75rem; color: var(--muted); opacity: 0.4; cursor: pointer;
+      padding: 8px 6px; transition: opacity 0.2s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .station-prev { text-align: right; }
     .station-next { text-align: left; }
     .station-prev:hover, .station-next:hover { opacity: 0.7; }
     .station-current {
-      flex-shrink: 0; padding: 10px 20px; font-size: 1.1rem; font-weight: 700;
+      flex-shrink: 0; padding: 8px 16px; font-size: 1rem; font-weight: 700;
       background: rgba(59,130,246,0.15); border: 2px solid var(--accent);
-      border-radius: 10px; color: var(--accent); text-align: center; min-width: 140px;
+      border-radius: 8px; color: var(--accent); text-align: center; min-width: 120px;
     }
-    .station-seq { font-size: 0.6rem; font-weight: 400; color: var(--muted); display: block; margin-top: 2px; }
+    .station-seq { font-size: 0.55rem; font-weight: 400; color: var(--muted); display: block; margin-top: 1px; }
     .entity-list { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
     .entity-row {
       display: flex; justify-content: space-between; align-items: center;
@@ -522,7 +520,7 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
     .cab-meta-panel a { color: var(--accent); }
   `, `
   <main>
-    <div class="card">
+    <div class="card" style="padding:10px 12px">
       <div class="station-carousel" id="station-carousel">
         <div class="station-prev" id="station-prev"></div>
         <div class="station-current" id="station-current">Select Station</div>
@@ -1569,21 +1567,21 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
 // ─── STATION VIEW PAGE ──────────────────────────────────────
 export function stationViewPage(config: TenantConfig, user: SessionUser): string {
   return page("Station View", `
-    main { flex: 1; padding: 16px; max-width: 600px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+    main { flex: 1; padding: 10px 16px 16px; max-width: 600px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
     .station-carousel { display: flex; align-items: center; justify-content: center; gap: 0; user-select: none; }
     .station-prev, .station-next {
-      flex: 1; font-size: 0.8rem; color: var(--muted); opacity: 0.4; cursor: pointer;
-      padding: 10px 8px; transition: opacity 0.2s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      flex: 1; font-size: 0.75rem; color: var(--muted); opacity: 0.4; cursor: pointer;
+      padding: 8px 6px; transition: opacity 0.2s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .station-prev { text-align: right; }
     .station-next { text-align: left; }
     .station-prev:hover, .station-next:hover { opacity: 0.7; }
     .station-current {
-      flex-shrink: 0; padding: 10px 20px; font-size: 1.1rem; font-weight: 700;
+      flex-shrink: 0; padding: 8px 16px; font-size: 1rem; font-weight: 700;
       background: rgba(59,130,246,0.15); border: 2px solid var(--accent);
-      border-radius: 10px; color: var(--accent); text-align: center; min-width: 140px;
+      border-radius: 8px; color: var(--accent); text-align: center; min-width: 120px;
     }
-    .station-seq { font-size: 0.6rem; font-weight: 400; color: var(--muted); display: block; margin-top: 2px; }
+    .station-seq { font-size: 0.55rem; font-weight: 400; color: var(--muted); display: block; margin-top: 1px; }
     .date-picker-row { display: flex; align-items: center; gap: 8px; }
     .date-picker-row button {
       padding: 6px 14px; font-size: 0.8rem; font-weight: 600; border-radius: 8px;
@@ -1655,7 +1653,7 @@ export function stationViewPage(config: TenantConfig, user: SessionUser): string
     .staging-flat-label { font-weight: 600; font-size: 0.85rem; }
 `, `
   <main>
-    <div class="card">
+    <div class="card" style="padding:10px 12px">
       <div class="station-carousel" id="station-carousel">
         <div class="station-prev" id="station-prev"></div>
         <div class="station-current" id="station-current">Select Station</div>
