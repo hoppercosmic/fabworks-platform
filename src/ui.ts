@@ -178,6 +178,30 @@ const SHARED_STYLES = `
     .pill-green { background: rgba(34,197,94,0.15); color: var(--success); }
     .pill-yellow { background: rgba(245,158,11,0.15); color: var(--warning); }
     .pill-purple { background: rgba(168,85,247,0.15); color: var(--purple); }
+    .qr-fab {
+      position: fixed; z-index: 180;
+      width: 56px; height: 56px; border-radius: 50%;
+      background: var(--accent); color: white; border: none; cursor: grab;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+      -webkit-tap-highlight-color: transparent;
+      touch-action: none;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .qr-fab:active { transform: scale(0.95); }
+    .qr-fab.dragging { cursor: grabbing; box-shadow: 0 8px 24px rgba(0,0,0,0.5); transform: scale(1.08); }
+    .qr-fab svg { width: 28px; height: 28px; }
+    .scanner-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 200;
+      display: none; flex-direction: column; align-items: center; justify-content: center;
+    }
+    .scanner-overlay.active { display: flex; }
+    .scanner-close {
+      position: absolute; top: 16px; right: 16px; background: none; border: none;
+      color: white; font-size: 2rem; cursor: pointer; z-index: 201;
+    }
+    #qr-reader { width: 100%; max-width: 400px; }
+    .scanner-status { color: var(--muted); font-size: 0.85rem; margin-top: 12px; }
 `;
 
 // ─── Page Layout ─────────────────────────────────────────
@@ -201,14 +225,125 @@ const USER_MENU_JS = `
           if (!_homePage) return;
           fetch('/api/auth/home', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ home_page: _homePage }) })
             .then(function(r) { return r.json(); })
-            .then(function(d) { if (d.ok) { _setHome.textContent = 'Home set ✓'; setTimeout(function() { _setHome.textContent = 'Set as Home'; _userDrop.classList.remove('open'); }, 1200); } });
+            .then(function(d) { if (d.ok) { _setHome.textContent = 'Home set \\u2713'; setTimeout(function() { _setHome.textContent = 'Set as Home'; _userDrop.classList.remove('open'); }, 1200); } });
         });
       }
     }
+
+    // --- Floating QR FAB ---
+    (function() {
+      var fab = document.getElementById('qr-fab');
+      if (!fab) return;
+      var saved = localStorage.getItem('fw_fab_pos');
+      var pos = saved ? JSON.parse(saved) : { right: 20, bottom: 80 };
+      fab.style.right = pos.right + 'px';
+      fab.style.bottom = pos.bottom + 'px';
+
+      var dragging = false, startX = 0, startY = 0, startRight = 0, startBottom = 0, moved = false;
+
+      function onStart(cx, cy) {
+        dragging = true; moved = false;
+        startX = cx; startY = cy;
+        startRight = parseInt(fab.style.right) || pos.right;
+        startBottom = parseInt(fab.style.bottom) || pos.bottom;
+        fab.classList.add('dragging');
+      }
+      function onMove(cx, cy) {
+        if (!dragging) return;
+        var dx = startX - cx, dy = startY - cy;
+        if (!moved && Math.abs(dx) < 10 && Math.abs(dy) < 10) return;
+        moved = true;
+        var r = Math.max(0, Math.min(window.innerWidth - 56, startRight + dx));
+        var b = Math.max(0, Math.min(window.innerHeight - 56, startBottom + dy));
+        fab.style.right = r + 'px'; fab.style.bottom = b + 'px';
+      }
+      function onEnd() {
+        if (!dragging) return;
+        dragging = false; fab.classList.remove('dragging');
+        if (moved) {
+          pos = { right: parseInt(fab.style.right), bottom: parseInt(fab.style.bottom) };
+          localStorage.setItem('fw_fab_pos', JSON.stringify(pos));
+        } else {
+          openGlobalScanner();
+        }
+      }
+
+      fab.addEventListener('touchstart', function(e) { e.preventDefault(); var t = e.touches[0]; onStart(t.clientX, t.clientY); }, { passive: false });
+      document.addEventListener('touchmove', function(e) { if (dragging) { e.preventDefault(); var t = e.touches[0]; onMove(t.clientX, t.clientY); } }, { passive: false });
+      document.addEventListener('touchend', onEnd);
+      fab.addEventListener('mousedown', function(e) { e.preventDefault(); onStart(e.clientX, e.clientY); });
+      document.addEventListener('mousemove', function(e) { onMove(e.clientX, e.clientY); });
+      document.addEventListener('mouseup', onEnd);
+
+      // --- Global Scanner ---
+      var overlay = document.getElementById('scanner-overlay');
+      var status = document.getElementById('scanner-status');
+      var qrScanner = null, scannerActive = false, libLoaded = typeof Html5Qrcode !== 'undefined';
+
+      function loadLib(cb) {
+        if (libLoaded) return cb();
+        var s = document.createElement('script');
+        s.src = 'https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js';
+        s.onload = function() { libLoaded = true; cb(); };
+        s.onerror = function() { status.textContent = 'Failed to load scanner'; };
+        document.head.appendChild(s);
+      }
+
+      function openGlobalScanner() {
+        overlay.classList.add('active');
+        status.textContent = 'Loading scanner...';
+        loadLib(function() {
+          status.textContent = 'Starting camera...';
+          if (!qrScanner) qrScanner = new Html5Qrcode('qr-reader');
+          qrScanner.start(
+            { facingMode: 'environment' },
+            { fps: 10, qrbox: { width: 250, height: 250 } },
+            function(decoded) { onGlobalQR(decoded); },
+            function() {}
+          ).then(function() {
+            scannerActive = true;
+            status.textContent = 'Point camera at a FabWorks QR code';
+          }).catch(function(err) { status.textContent = 'Camera error: ' + err; });
+        });
+      }
+
+      function stopGlobalScanner() {
+        if (qrScanner && scannerActive) {
+          qrScanner.stop().then(function() { scannerActive = false; });
+        }
+        overlay.classList.remove('active');
+      }
+
+      document.getElementById('scanner-close').addEventListener('click', stopGlobalScanner);
+
+      window._fabworksStopScanner = stopGlobalScanner;
+
+      function onGlobalQR(text) {
+        stopGlobalScanner();
+        if (typeof window._fabworksHandleQR === 'function') {
+          window._fabworksHandleQR(text);
+        } else {
+          window.location.href = '/scan?qr=' + encodeURIComponent(text);
+        }
+      }
+    })();
 `;
 
 function page(title: string, extraStyles: string, body: string, script: string, user: SessionUser | null, currentPath: string, cdnScripts: string[] = []): string {
   const cdnTags = cdnScripts.map((src) => `<script src="${src}"></script>`).join("\n  ");
+  const scannerHtml = user ? `
+  <button class="qr-fab" id="qr-fab" title="Scan QR code">
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/>
+      <path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/>
+      <line x1="7" y1="12" x2="17" y2="12"/><line x1="12" y1="7" x2="12" y2="17"/>
+    </svg>
+  </button>
+  <div class="scanner-overlay" id="scanner-overlay">
+    <button class="scanner-close" id="scanner-close">&times;</button>
+    <div id="qr-reader"></div>
+    <div class="scanner-status" id="scanner-status">Point camera at a FabWorks QR code</div>
+  </div>` : "";
   const navHtml = user ? `
   <nav class="top-nav">${renderNav(currentPath, user)}</nav>
   <div class="page-header">
@@ -233,6 +368,7 @@ function page(title: string, extraStyles: string, body: string, script: string, 
 </head>
 <body>
   ${navHtml}
+  ${scannerHtml}
   ${body}
   ${cdnTags}
   <script>${user ? USER_MENU_JS : ""}${script}</script>
@@ -368,25 +504,6 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
     .entity-row .meta { font-size: 0.75rem; color: var(--muted); }
     .section-label { font-size: 0.75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px; }
     #context-panel { display: none; }
-    .job-input-row { display: flex; gap: 8px; align-items: center; }
-    .job-input-row input { flex: 1; }
-    .cam-btn {
-      width: 48px; height: 48px; flex-shrink: 0; border: 1px solid var(--border);
-      border-radius: 8px; background: var(--bg); color: var(--accent); cursor: pointer;
-      display: flex; align-items: center; justify-content: center; font-size: 1.3rem;
-    }
-    .cam-btn:active { transform: scale(0.95); }
-    .scanner-overlay {
-      position: fixed; inset: 0; background: rgba(0,0,0,0.95); z-index: 200;
-      display: none; flex-direction: column; align-items: center; justify-content: center;
-    }
-    .scanner-overlay.active { display: flex; }
-    .scanner-close {
-      position: absolute; top: 16px; right: 16px; background: none; border: none;
-      color: white; font-size: 2rem; cursor: pointer; z-index: 201;
-    }
-    #qr-reader { width: 100%; max-width: 400px; }
-    .scanner-status { color: var(--muted); font-size: 0.85rem; margin-top: 12px; }
     .swipe-toast {
       position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
       background: var(--surface); border: 1px solid var(--accent); border-radius: 12px;
@@ -414,16 +531,8 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
     </div>
     <div class="card">
       <label>${config.entity_labels.l1}</label>
-      <div class="job-input-row">
-        <input type="text" id="job-input" placeholder="${config.entity_labels.l1} number" inputmode="numeric" autocomplete="off">
-        <button class="cam-btn" id="cam-btn" title="Scan QR code">&#x1F4F7;</button>
-      </div>
+      <input type="text" id="job-input" placeholder="${config.entity_labels.l1} number" inputmode="numeric" autocomplete="off">
       <div id="job-info" style="margin-top:8px;font-size:0.85rem;color:var(--muted)"></div>
-    </div>
-    <div class="scanner-overlay" id="scanner-overlay">
-      <button class="scanner-close" id="scanner-close">&times;</button>
-      <div id="qr-reader"></div>
-      <div class="scanner-status" id="scanner-status">Point camera at a FabWorks QR code</div>
     </div>
     <div class="card" id="context-panel">
       <div id="context-label" class="section-label"></div>
@@ -667,44 +776,7 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
       fireAction();
     });
 
-    // --- QR Scanner ---
-    var scannerOverlay = document.getElementById('scanner-overlay');
-    var scannerStatus = document.getElementById('scanner-status');
-    var qrScanner = null;
-    var scannerActive = false;
-
-    document.getElementById('cam-btn').addEventListener('click', function() {
-      if (typeof Html5Qrcode === 'undefined') {
-        scannerStatus.textContent = 'Scanner library not loaded';
-        return;
-      }
-      scannerOverlay.classList.add('active');
-      scannerStatus.textContent = 'Starting camera...';
-
-      if (!qrScanner) qrScanner = new Html5Qrcode('qr-reader');
-
-      qrScanner.start(
-        { facingMode: 'environment' },
-        { fps: 10, qrbox: { width: 250, height: 250 } },
-        function(decoded) { handleQR(decoded); },
-        function() {}
-      ).then(function() {
-        scannerActive = true;
-        scannerStatus.textContent = 'Point camera at a FabWorks QR code';
-      }).catch(function(err) {
-        scannerStatus.textContent = 'Camera error: ' + err;
-      });
-    });
-
-    function stopScanner() {
-      if (qrScanner && scannerActive) {
-        qrScanner.stop().then(function() { scannerActive = false; });
-      }
-      scannerOverlay.classList.remove('active');
-    }
-
-    document.getElementById('scanner-close').addEventListener('click', stopScanner);
-
+    // --- QR handler (fed by global FAB scanner) ---
     function tryAutoFire() {
       if (!pendingStation || !jobData || !selectedEntityId) return;
       selectStation(pendingStation);
@@ -713,7 +785,6 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
     }
 
     function handleQR(text) {
-      stopScanner();
       var parts = text.split(':');
       if (parts[0] !== 'fw' || parts.length < 3) {
         scannerStatus.textContent = 'Not a FabWorks code';
@@ -859,6 +930,14 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
       }
     }, { passive: true });
 
+    window._fabworksHandleQR = handleQR;
+
+    var qrParam = new URLSearchParams(window.location.search).get('qr');
+    if (qrParam) {
+      history.replaceState(null, '', '/scan');
+      handleQR(qrParam);
+    }
+
     fetch('/api/build/active').then(function(r) { return r.json(); }).then(function(data) {
       if (data.session) {
         var b = document.getElementById('active-build-banner');
@@ -866,7 +945,7 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
         b.style.display = 'block';
       }
     });
-`, user, "/scan", ["https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"]);
+`, user, "/scan");
 }
 
 // ─── NEW JOB PAGE ────────────────────────────────────────
