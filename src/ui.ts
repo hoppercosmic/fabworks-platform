@@ -893,6 +893,7 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
     document.addEventListener('touchstart', function(e) {
       var tag = e.target.tagName;
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'BUTTON') return;
+      if (e.target.closest && e.target.closest('.qr-fab')) return;
       touchStartX = e.touches[0].clientX;
       touchStartY = e.touches[0].clientY;
       swiping = true;
@@ -2013,6 +2014,7 @@ export function stationViewPage(config: TenantConfig, user: SessionUser): string
     document.addEventListener('touchstart', function(e) {
       var tag = e.target.tagName;
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || tag === 'BUTTON') return;
+      if (e.target.closest && e.target.closest('.qr-fab')) return;
       touchStartX = e.touches[0].clientX;
       touchStartY = e.touches[0].clientY;
       swiping = true;
