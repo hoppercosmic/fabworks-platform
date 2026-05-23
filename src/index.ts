@@ -1449,7 +1449,7 @@ app.get("/", requireAuth(), (c) => {
   }
 });
 app.get("/scan", requireAuth(), (c) => c.html(scanPage(c.get("config"), c.get("user")!)));
-app.get("/jobs/new", requireAuth(), (c) => c.html(newJobPage(c.get("config"), c.get("user")!)));
+app.get("/jobs/new", requireAuth("admin"), (c) => c.html(newJobPage(c.get("config"), c.get("user")!)));
 app.get("/dashboard", requireAuth(), (c) => c.html(dashboardPage(c.get("config"), c.get("user")!)));
 app.get("/job/:id", requireAuth(), (c) => c.html(jobDetailPage(c.get("config"), c.get("user")!)));
 app.get("/stations", requireAuth(), (c) => c.html(stationViewPage(c.get("config"), c.get("user")!)));

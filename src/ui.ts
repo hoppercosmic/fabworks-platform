@@ -20,7 +20,7 @@ const NAV_ITEMS: NavItem[] = [
   { path: "/",           label: "Home",      icon: IC('<path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/>'), minRole: "user" },
   { path: "/scan",       label: "Scan",      icon: SVG_SCAN,  minRole: "user" },
   { path: "/workbench",  label: "Build",     icon: SVG_WRENCH, minRole: "user" },
-  { path: "/jobs/new",   label: "New Job",   icon: SVG_PLUS,  minRole: "user" },
+  { path: "/jobs/new",   label: "New Job",   icon: SVG_PLUS,  minRole: "admin" },
   { path: "/dashboard",  label: "Dash",      icon: SVG_CHART, minRole: "user" },
   { path: "/stations",   label: "Stations",  icon: SVG_GRID,  minRole: "user" },
   { path: "/fixit",      label: "FixIt",     icon: SVG_ALERT, minRole: "user" },
