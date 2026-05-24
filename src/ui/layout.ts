@@ -30,60 +30,77 @@ function getMenuIcon(iconKey: string): string {
 // ─── Nav Items ───────────────────────────────────────────
 export const ROLE_LEVELS: Record<UserRole, number> = { user: 0, lead: 1, supervisor: 2, admin: 3 };
 
-type NavItem = { path: string; label: string; icon: string; minRole: UserRole };
+type NavItem = { path: string; label: string; minRole: UserRole };
 
-const PRIMARY_NAV: NavItem[] = [
-  { path: "/dashboard",  label: "Dash",      icon: SVG_CHART, minRole: "user" },
-  { path: "/workbench",  label: "Build",     icon: SVG_WRENCH, minRole: "user" },
+const TOOLS_NAV: NavItem[] = [
+  { path: "/kpi",        label: "KPI",       minRole: "lead" },
+  { path: "/takt",       label: "Takt",      minRole: "lead" },
+  { path: "/fixit",      label: "FixIt",     minRole: "lead" },
+  { path: "/jobs/new",   label: "New Job",   minRole: "admin" },
+  { path: "/qr",         label: "QR Codes",  minRole: "admin" },
 ];
 
-const UTIL_NAV: NavItem[] = [
-  { path: "/kpi",        label: "KPI",       icon: SVG_TREND, minRole: "lead" },
-  { path: "/takt",       label: "Takt",      icon: SVG_CLOCK, minRole: "lead" },
-  { path: "/jobs/new",   label: "New Job",   icon: SVG_PLUS,  minRole: "admin" },
-  { path: "/admin",      label: "Admin",     icon: SVG_GEAR,  minRole: "admin" },
-];
-
-function renderNavItem(item: NavItem, currentPath: string): string {
-  const active = item.path === currentPath;
-  return `<a href="${item.path}" class="nav-item${active ? " active" : ""}"><span class="nav-icon">${item.icon}</span><span class="nav-label">${item.label}</span></a>`;
-}
-
-function renderNav(currentPath: string, user: SessionUser, config: TenantConfig | null): string {
+function renderTopBar(currentPath: string, user: SessionUser, config: TenantConfig | null): string {
   const userLevel = ROLE_LEVELS[user.role];
-  const items: string[] = [];
+  const isLead = userLevel >= ROLE_LEVELS.lead;
 
-  PRIMARY_NAV.filter(i => userLevel >= ROLE_LEVELS[i.minRole]).forEach(i => items.push(renderNavItem(i, currentPath)));
+  const dashActive = currentPath === "/dashboard" ? " active" : "";
+  const buildActive = currentPath === "/workbench" ? " active" : "";
 
-  const utilItems = UTIL_NAV.filter(i => userLevel >= ROLE_LEVELS[i.minRole]);
-  if (utilItems.length > 0) {
-    items.push('<span class="nav-sep"></span>');
-    utilItems.forEach(i => items.push(renderNavItem(i, currentPath)));
+  // Stations dropdown
+  let stationsHtml = "";
+  if (config && config.station_menus && config.station_menus.length > 0) {
+    const visibleMenus = config.station_menus.filter((m: StationMenu) => userLevel >= ROLE_LEVELS[m.minRole]);
+    if (visibleMenus.length > 0) {
+      const isStationActive = visibleMenus.some((m: StationMenu) => currentPath === `/menu/${m.slug}`) || currentPath === "/stations";
+      const menuLinks = visibleMenus.map((m: StationMenu) => {
+        const active = currentPath === `/menu/${m.slug}`;
+        return `<a href="/menu/${m.slug}" class="dd-item${active ? " active" : ""}">${m.name}</a>`;
+      }).join("");
+      stationsHtml = `<div class="nav-dd"><button class="nav-btn${isStationActive ? " active" : ""}" id="stations-trigger"><span class="nav-icon">${SVG_SCAN}</span><span class="nav-label">Stations</span></button><div class="nav-dropdown" id="stations-dropdown">${menuLinks}<div class="dd-divider"></div><a href="/stations" class="dd-item${currentPath === "/stations" ? " active" : ""}">Station View</a></div></div>`;
+    }
   }
 
-  return items.join("");
-}
+  // Tools dropdown (role-gated)
+  const toolItems = TOOLS_NAV.filter(i => userLevel >= ROLE_LEVELS[i.minRole]);
+  let toolsHtml = "";
+  if (toolItems.length > 0) {
+    const isToolActive = toolItems.some(i => currentPath === i.path);
+    const toolLinks = toolItems.map(i => {
+      const active = currentPath === i.path;
+      return `<a href="${i.path}" class="dd-item${active ? " active" : ""}">${i.label}</a>`;
+    }).join("");
+    toolsHtml = `<div class="nav-dd"><button class="nav-btn${isToolActive ? " active" : ""}" id="tools-trigger"><span class="nav-icon">${SVG_TREND}</span><span class="nav-label">Tools</span></button><div class="nav-dropdown" id="tools-dropdown">${toolLinks}</div></div>`;
+  }
 
-function renderStationsDropdown(currentPath: string, user: SessionUser, config: TenantConfig | null): string {
-  if (!config || !config.station_menus || config.station_menus.length === 0) return "";
-  const userLevel = ROLE_LEVELS[user.role];
-  const visibleMenus = config.station_menus.filter((m: StationMenu) => userLevel >= ROLE_LEVELS[m.minRole]);
-  if (visibleMenus.length === 0) return "";
+  // User dropdown (expanded with role sections)
+  const userLinks: string[] = [];
+  userLinks.push(`<div class="dd-info"><div class="dd-name">${user.name}</div><div class="dd-role">${user.role}</div></div>`);
+  userLinks.push(`<a href="/profile" class="dd-item${currentPath === "/profile" ? " active" : ""}">Profile</a>`);
+  userLinks.push(`<a href="#" class="dd-item" id="set-home-link">Set as Home</a>`);
+  if (userLevel >= ROLE_LEVELS.admin) {
+    userLinks.push(`<div class="dd-divider"></div>`);
+    userLinks.push(`<div class="dd-section">Admin</div>`);
+    userLinks.push(`<a href="/admin" class="dd-item${currentPath === "/admin" ? " active" : ""}">System Settings</a>`);
+  }
+  if (userLevel >= ROLE_LEVELS.supervisor) {
+    if (userLevel < ROLE_LEVELS.admin) userLinks.push(`<div class="dd-divider"></div>`);
+    if (userLevel < ROLE_LEVELS.admin) userLinks.push(`<div class="dd-section">Supervisor</div>`);
+  }
+  userLinks.push(`<div class="dd-divider"></div>`);
+  userLinks.push(`<a href="#" class="dd-item dd-logout" id="logout-link">Log out</a>`);
 
-  const isStationActive = visibleMenus.some((m: StationMenu) => currentPath === `/menu/${m.slug}`) || currentPath === "/stations";
-  const menuLinks = visibleMenus.map((m: StationMenu) => {
-    const active = currentPath === `/menu/${m.slug}`;
-    return `<a href="/menu/${m.slug}" class="sd-item${active ? " active" : ""}">${m.name}</a>`;
-  }).join("");
-
-  return `<div class="stations-menu">
-    <button class="nav-item stations-trigger${isStationActive ? " active" : ""}" id="stations-trigger">
-      <span class="nav-icon">${SVG_SCAN}</span><span class="nav-label">Stations ▾</span>
-    </button>
-    <div class="stations-dropdown" id="stations-dropdown">
-      ${menuLinks}
-      <div class="sd-divider"></div>
-      <a href="/stations" class="sd-item${currentPath === "/stations" ? " active" : ""}">Station View</a>
+  return `<div class="top-bar">
+    <div class="top-bar-title">FabWorks</div>
+    <nav class="top-nav">
+      <a href="/dashboard" class="nav-btn${dashActive}"><span class="nav-icon">${SVG_CHART}</span><span class="nav-label">Dash</span></a>
+      <a href="/workbench" class="nav-btn${buildActive}"><span class="nav-icon">${SVG_WRENCH}</span><span class="nav-label">Build</span></a>
+      ${stationsHtml}
+      ${toolsHtml}
+    </nav>
+    <div class="nav-dd nav-dd-right">
+      <button class="user-avatar" id="user-avatar-btn">${user.name.charAt(0).toUpperCase()}</button>
+      <div class="nav-dropdown nav-dropdown-right" id="user-dropdown">${userLinks.join("")}</div>
     </div>
   </div>`;
 }
@@ -126,54 +143,44 @@ export const SHARED_STYLES = `
       color: var(--text); white-space: nowrap;
     }
     .top-nav {
-      flex: 1; display: flex;
-      overflow-x: auto;
-      -webkit-overflow-scrolling: touch;
-      scrollbar-width: none;
-      padding: 0 2px;
+      flex: 1; display: flex; align-items: center; gap: 2px; padding: 0 4px;
     }
-    .top-nav::-webkit-scrollbar { display: none; }
-    .nav-item {
+    .nav-btn {
       display: flex; flex-direction: column; align-items: center; justify-content: center;
-      min-width: 52px; padding: 6px 8px 4px;
+      min-width: 48px; padding: 6px 8px 4px;
       color: var(--muted); text-decoration: none; flex-shrink: 0;
+      background: none; border: none; font-family: inherit; cursor: pointer;
       -webkit-tap-highlight-color: transparent; transition: color 0.15s;
     }
-    .nav-item.active { color: var(--accent); }
+    .nav-btn.active { color: var(--accent); }
     .nav-icon { width: 22px; height: 22px; }
     .nav-icon svg { width: 22px; height: 22px; }
     .nav-label { font-size: 0.55rem; font-weight: 600; margin-top: 1px; letter-spacing: 0.02em; }
-    .nav-sep { width: 1px; height: 28px; background: var(--border); flex-shrink: 0; margin: 0 4px; align-self: center; }
+    .nav-dd { position: relative; flex-shrink: 0; }
+    .nav-dd-right { padding: 0 10px; }
     .user-avatar {
       width: 32px; height: 32px; border-radius: 50%;
       background: var(--accent); color: white;
       font-weight: 700; font-size: 0.8rem; border: none; cursor: pointer;
       display: flex; align-items: center; justify-content: center;
     }
-    .user-menu { position: relative; flex-shrink: 0; padding: 0 10px; }
-    .user-dropdown {
-      display: none; position: absolute; right: 0; top: 100%; margin-top: 4px;
-      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-      min-width: 160px; z-index: 150; overflow: hidden;
-    }
-    .user-dropdown.open { display: block; }
-    .user-dropdown .ud-info { padding: 12px 14px; border-bottom: 1px solid var(--border); }
-    .user-dropdown .ud-name { font-weight: 700; font-size: 0.9rem; }
-    .user-dropdown .ud-role { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
-    .user-dropdown a { display: block; padding: 12px 14px; color: var(--text); text-decoration: none; font-size: 0.85rem; }
-    .user-dropdown a:hover { background: var(--bg); }
-    .stations-menu { position: relative; flex-shrink: 0; }
-    .stations-trigger { background: none; border: none; font-family: inherit; }
-    .stations-dropdown {
+    .nav-dropdown {
       display: none; position: absolute; left: 0; top: 100%; margin-top: 4px;
       background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
       min-width: 180px; z-index: 150; overflow: hidden;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.4);
     }
-    .stations-dropdown.open { display: block; }
-    .sd-item { display: block; padding: 12px 14px; color: var(--text); text-decoration: none; font-size: 0.85rem; }
-    .sd-item:hover { background: var(--bg); }
-    .sd-item.active { color: var(--accent); font-weight: 600; }
-    .sd-divider { height: 1px; background: var(--border); margin: 0; }
+    .nav-dropdown-right { left: auto; right: 0; }
+    .nav-dropdown.open { display: block; }
+    .dd-item { display: block; padding: 11px 14px; color: var(--text); text-decoration: none; font-size: 0.85rem; }
+    .dd-item:hover { background: var(--bg); }
+    .dd-item.active { color: var(--accent); font-weight: 600; }
+    .dd-item.dd-logout { color: var(--error); }
+    .dd-divider { height: 1px; background: var(--border); }
+    .dd-info { padding: 12px 14px; border-bottom: 1px solid var(--border); }
+    .dd-name { font-weight: 700; font-size: 0.9rem; }
+    .dd-role { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .dd-section { padding: 8px 14px 4px; font-size: 0.65rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
     .card {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -273,55 +280,55 @@ export const SHARED_STYLES = `
 
 // ─── Page Layout ─────────────────────────────────────────
 const USER_MENU_JS = `
-    // --- Center active nav item ---
+    // --- Dropdown toggle system ---
     (function() {
-      var nav = document.querySelector('.top-nav');
-      var active = document.querySelector('.nav-item.active');
-      if (nav && active) {
-        var offset = active.offsetLeft - (nav.offsetWidth / 2) + (active.offsetWidth / 2);
-        nav.scrollTo({ left: Math.max(0, offset), behavior: 'instant' });
+      var dropdowns = document.querySelectorAll('.nav-dropdown');
+      var triggers = [
+        { btn: document.getElementById('stations-trigger'), dd: document.getElementById('stations-dropdown') },
+        { btn: document.getElementById('tools-trigger'), dd: document.getElementById('tools-dropdown') },
+        { btn: document.getElementById('user-avatar-btn'), dd: document.getElementById('user-dropdown') }
+      ];
+      function closeAll(except) {
+        dropdowns.forEach(function(d) { if (d !== except) d.classList.remove('open'); });
       }
+      triggers.forEach(function(t) {
+        if (t.btn && t.dd) {
+          t.btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            var opening = !t.dd.classList.contains('open');
+            closeAll(t.dd);
+            t.dd.classList.toggle('open');
+          });
+        }
+      });
+      document.addEventListener('click', function() { closeAll(); });
     })();
 
-    var _avatarBtn = document.getElementById('user-avatar-btn');
-    var _userDrop = document.getElementById('user-dropdown');
-    var _stationsBtn = document.getElementById('stations-trigger');
-    var _stationsDrop = document.getElementById('stations-dropdown');
-    if (_stationsBtn) {
-      _stationsBtn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        _stationsDrop.classList.toggle('open');
-        _userDrop.classList.remove('open');
-      });
-    }
-    if (_avatarBtn) {
-      _avatarBtn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        _userDrop.classList.toggle('open');
-        if (_stationsDrop) _stationsDrop.classList.remove('open');
-      });
-      document.addEventListener('click', function() {
-        _userDrop.classList.remove('open');
-        if (_stationsDrop) _stationsDrop.classList.remove('open');
-      });
-      document.getElementById('logout-link').addEventListener('click', function(e) {
-        e.preventDefault();
-        fetch('/api/auth/logout', { method: 'POST' }).then(function() { window.location.href = '/login'; });
-      });
+    // --- Logout ---
+    document.getElementById('logout-link').addEventListener('click', function(e) {
+      e.preventDefault();
+      fetch('/api/auth/logout', { method: 'POST' }).then(function() { window.location.href = '/login'; });
+    });
+
+    // --- Set as Home ---
+    (function() {
       var _setHome = document.getElementById('set-home-link');
-      if (_setHome) {
-        var _pathMap = { '/scan': 'scan', '/': 'scan', '/workbench': 'workbench', '/fixit': 'fixit', '/stations': 'staging', '/dashboard': 'dashboard' };
-        var _homePage = _pathMap[window.location.pathname];
-        if (!_homePage) _setHome.style.display = 'none';
-        _setHome.addEventListener('click', function(e) {
-          e.preventDefault();
-          if (!_homePage) return;
-          fetch('/api/auth/home', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ home_page: _homePage }) })
-            .then(function(r) { return r.json(); })
-            .then(function(d) { if (d.ok) { _setHome.textContent = 'Home set \\u2713'; setTimeout(function() { _setHome.textContent = 'Set as Home'; _userDrop.classList.remove('open'); }, 1200); } });
-        });
-      }
-    }
+      if (!_setHome) return;
+      var _pathMap = { '/scan': 'scan', '/': 'scan', '/workbench': 'workbench', '/fixit': 'fixit', '/stations': 'staging', '/dashboard': 'dashboard' };
+      var _homePage = _pathMap[window.location.pathname];
+      if (!_homePage) { _setHome.style.display = 'none'; return; }
+      _setHome.addEventListener('click', function(e) {
+        e.preventDefault();
+        fetch('/api/auth/home', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ home_page: _homePage }) })
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            if (d.ok) {
+              _setHome.textContent = 'Home set \\u2713';
+              setTimeout(function() { _setHome.textContent = 'Set as Home'; }, 1200);
+            }
+          });
+      });
+    })();
 
     // --- Floating QR FAB ---
     (function() {
@@ -486,21 +493,7 @@ export function page(title: string, extraStyles: string, body: string, script: s
     <div style="font-size:0.9rem;color:#666;margin-top:4px" id="fab-spot-sub"></div>
     <div style="font-size:0.75rem;color:#999;margin-top:24px">Tap anywhere to close</div>
   </div>` : "";
-  const navHtml = user ? `
-  <div class="top-bar">
-    <div class="top-bar-title">FabWorks</div>
-    <nav class="top-nav">${renderNav(currentPath, user, config)}</nav>
-    ${renderStationsDropdown(currentPath, user, config)}
-    <div class="user-menu">
-      <button class="user-avatar" id="user-avatar-btn">${user.name.charAt(0).toUpperCase()}</button>
-      <div class="user-dropdown" id="user-dropdown">
-        <div class="ud-info"><div class="ud-name">${user.name}</div><div class="ud-role">${user.role}</div></div>
-        <a href="/profile">Profile</a>
-        <a href="#" id="set-home-link">Set as Home</a>
-        <a href="#" id="logout-link">Log out</a>
-      </div>
-    </div>
-  </div>` : `<div style="padding:0"></div>`;
+  const navHtml = user ? renderTopBar(currentPath, user, config) : `<div style="padding:0"></div>`;
   const bodyPadding = user ? '' : 'body{padding-top:0;}';
   return `<!DOCTYPE html>
 <html lang="en">
