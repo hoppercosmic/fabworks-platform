@@ -133,7 +133,7 @@ export function stagingPage(config: TenantConfig, user: SessionUser): string {
             var stationName = c.last_station ? (STATION_NAMES[c.last_station] || c.last_station) : 'No scans';
             var locHtml = c.staging_location ? '<div class="sr-loc">' + escHtml(c.staging_location) + '</div>' : '';
             var agoHtml = c.last_scan_at ? '<div style="font-size:0.7rem;color:var(--muted)">' + timeAgo(new Date(c.last_scan_at + 'Z')) + '</div>' : '';
-            return '<div class="sr-card">'
+            return '<a href="/cabinet/' + c.id + '" class="sr-card" style="text-decoration:none;color:var(--text)">'
               + '<div>'
               +   '<div class="sr-primary">' + escHtml(lbl) + '</div>'
               +   '<div class="sr-secondary">' + c.job_number + ' — ' + escHtml(c.job_name) + (c.bucket_name ? ' / ' + escHtml(c.bucket_name) : '') + '</div>'
@@ -145,7 +145,7 @@ export function stagingPage(config: TenantConfig, user: SessionUser): string {
               +   agoHtml
               +   locHtml
               + '</div>'
-              + '</div>';
+              + '</a>';
           }).join('') + '</div>';
         });
     }
@@ -218,7 +218,7 @@ export function stagingPage(config: TenantConfig, user: SessionUser): string {
             : '<div class="loc-empty" data-cab="' + cab.id + '">+ Location</div>';
           return '<div class="pj-cab">'
             + '<div class="pj-cab-info">'
-            +   '<div class="pj-cab-label">' + escHtml(lbl) + ' ' + stagedHtml + '</div>'
+            +   '<div class="pj-cab-label"><a href="/cabinet/' + cab.id + '" style="color:var(--text);text-decoration:none">' + escHtml(lbl) + '</a> ' + stagedHtml + '</div>'
             +   (bucket ? '<div class="pj-cab-meta">' + escHtml(bucket) + '</div>' : '')
             +   renderFlagBadges(cab.flags)
             + '</div>'

@@ -296,9 +296,13 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
           if (r.status === 202) {
             resultDiv.innerHTML = station.name + '<div class="detail">Queued — will sync when online</div>';
           } else {
+            var cabLink = r.data.cabinet_id
+              ? ' <a href="/cabinet/' + r.data.cabinet_id + '" style="color:var(--accent);font-weight:600">View →</a>'
+              : '';
             resultDiv.innerHTML = r.data.station + '<div class="detail">' +
               r.data.job_number + ' ' + r.data.job_name +
-              (r.data.scanned_by ? ' — ' + r.data.scanned_by : '') + '</div>';
+              (r.data.scanned_by ? ' — ' + r.data.scanned_by : '') +
+              cabLink + '</div>';
           }
           selectedEntityId = null;
           fetch('/api/jobs/' + jobData.id).then(function(r2) { return r2.json(); }).then(function(detail) {

@@ -1,0 +1,1 @@
+ALTER TABLE cabinets ADD COLUMN properties TEXT NOT NULL DEFAULT '{}';

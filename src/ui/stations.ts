@@ -230,7 +230,7 @@ export function stationViewPage(config: TenantConfig, user: SessionUser): string
             : '<div class="staging-loc-empty" data-cab="' + cab.id + '">+ Location</div>';
           return '<div class="staging-cab">' +
             '<div class="staging-cab-info">' +
-              '<div class="staging-cab-label">' + lbl + '</div>' +
+              '<a href="/cabinet/' + cab.id + '" class="staging-cab-label" style="color:var(--text);text-decoration:none">' + lbl + '</a>' +
               (bucket ? '<div class="staging-cab-bucket">' + bucket + '</div>' : '') +
             '</div>' +
             '<div class="staging-loc">' + locHtml + '</div>' +
@@ -303,7 +303,7 @@ export function stationViewPage(config: TenantConfig, user: SessionUser): string
         }
         html += '<div class="staging-flat-card">' +
           '<div>' +
-            '<div class="staging-flat-label">' + lbl + '</div>' +
+            '<a href="/cabinet/' + item.cab.id + '" class="staging-flat-label" style="color:var(--text);text-decoration:none">' + lbl + '</a>' +
             '<div class="staging-flat-job">' + item.job_number + ' ' + item.job_name + (item.cab.bucket_name ? ' / ' + item.cab.bucket_name : '') + '</div>' +
             metaLine +
           '</div>' +
@@ -404,13 +404,13 @@ export function stationViewPage(config: TenantConfig, user: SessionUser): string
                 if (cab.assembly_sheet_url) meta += '<div><a href="' + cab.assembly_sheet_url.replace(/"/g,'&quot;') + '" target="_blank" rel="noopener" style="color:var(--accent)">Assembly Sheet ↗</a></div>';
                 meta += '</div>';
               }
-              return '<div class="item-card"><div>' +
+              return '<a href="/cabinet/' + cab.id + '" class="item-card" style="text-decoration:none;color:var(--text)"><div>' +
                 '<div class="primary">' + lbl + '</div>' +
                 '<div class="secondary">' + cab.job_number + ' ' + cab.job_name + bucket + '</div>' +
                 '</div><div class="right">' +
                 '<div>' + timeAgo(new Date(cab.scanned_at + 'Z')) + '</div>' +
-                '<a href="/job/' + cab.job_id + '">Details</a>' +
-                '</div></div>' + meta;
+                '<span style="color:var(--accent);font-size:0.75rem">View →</span>' +
+                '</div></a>' + meta;
             }).join('');
           }
         });

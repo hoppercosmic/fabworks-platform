@@ -144,7 +144,8 @@ export function workbenchPage(config: TenantConfig, user: SessionUser): string {
       isPaused = !!s.paused_at;
       pausedAtMs = isPaused ? new Date(s.paused_at + 'Z').getTime() : 0;
 
-      document.getElementById('cab-number').textContent = '${config.entity_labels.l3} #' + s.cabinet_number;
+      var cabEl = document.getElementById('cab-number');
+      cabEl.innerHTML = '<a href="/cabinet/' + s.cabinet_id + '" style="color:inherit;text-decoration:none">${config.entity_labels.l3} #' + s.cabinet_number + '</a>';
       document.getElementById('cab-label').textContent = s.label || '';
       document.getElementById('job-line').textContent = s.job_number + ' — ' + s.job_name;
 

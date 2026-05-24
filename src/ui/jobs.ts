@@ -119,6 +119,7 @@ export function jobDetailPage(config: TenantConfig, user: SessionUser): string {
     .scan-station { font-weight: 600; color: var(--accent); }
     .scan-meta { color: var(--muted); font-size: 0.75rem; }
     .cab-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 6px; }
+    .cab-tile, a.cab-tile { text-decoration: none; color: var(--text); }
     .cab-tile {
       padding: 10px 6px; text-align: center; background: var(--bg);
       border: 1px solid var(--border); border-radius: 8px; font-size: 0.8rem; font-weight: 600;
@@ -202,6 +203,18 @@ export function jobDetailPage(config: TenantConfig, user: SessionUser): string {
         </div>
         <div class="cab-grid" id="cab-grid"></div>
       </div>
+      <div class="card" id="import-section" style="display:none">
+        <div class="section-title">
+          <span>Import Cut List</span>
+          <button class="btn btn-sm" id="import-toggle-btn" style="background:var(--accent);color:white">Upload CSV</button>
+        </div>
+        <div id="import-ui" style="display:none">
+          <input type="file" id="import-file" accept=".csv" style="margin-bottom:8px;font-size:0.8rem">
+          <div id="import-preview" style="font-size:0.75rem;color:var(--muted);margin-bottom:8px"></div>
+          <button class="btn btn-sm" id="import-confirm-btn" style="background:var(--success);color:white;display:none">Confirm Import</button>
+          <div id="import-result" style="font-size:0.8rem;margin-top:8px"></div>
+        </div>
+      </div>
       <div class="card">
         <div class="section-title">Scan History</div>
         <div class="scan-log" id="scan-log"></div>
@@ -266,20 +279,13 @@ export function jobDetailPage(config: TenantConfig, user: SessionUser): string {
           job.buckets.map(function(b) { return '<option value="' + b.id + '">' + b.name + '</option>'; }).join('');
 
         var grid = document.getElementById('cab-grid');
-        var isLead = ROLE_LEVELS[USER_ROLE] >= ROLE_LEVELS['lead'];
         grid.innerHTML = job.cabinets.map(function(c) {
           var hasMeta = c.accessories || c.notes || c.assembly_sheet_url;
-          return '<div class="cab-tile ' + c.status + (isLead ? ' clickable' : '') + '"' +
-            (isLead ? ' data-cab-id="' + c.id + '"' : '') + '>' +
+          return '<a class="cab-tile ' + c.status + ' clickable" href="/cabinet/' + c.id + '">' +
             LABELS.l3 + ' ' + c.cabinet_number +
             (hasMeta ? '<span class="meta-dot" title="Has metadata"></span>' : '') +
-            '<div class="sub">' + (c.label || displayStatus(c.status)) + '</div></div>';
+            '<div class="sub">' + (c.label || displayStatus(c.status)) + '</div></a>';
         }).join('') || '<div style="color:var(--muted);font-size:0.8rem">No ' + LABELS.l3.toLowerCase() + 's yet</div>';
-        grid.querySelectorAll('.cab-tile[data-cab-id]').forEach(function(tile) {
-          tile.addEventListener('click', function() {
-            openCabModal(parseInt(tile.getAttribute('data-cab-id')));
-          });
-        });
 
         var log = document.getElementById('scan-log');
         log.innerHTML = job.scans.map(function(s) {
@@ -342,6 +348,55 @@ export function jobDetailPage(config: TenantConfig, user: SessionUser): string {
       });
       Promise.all(promises).then(function() { load(); });
     });
+
+    // --- CSV Import ---
+    if (ROLE_LEVELS[USER_ROLE] >= ROLE_LEVELS.lead) {
+      document.getElementById('import-section').style.display = '';
+      var importFile = document.getElementById('import-file');
+      var importPreview = document.getElementById('import-preview');
+      var importConfirm = document.getElementById('import-confirm-btn');
+      var importResult = document.getElementById('import-result');
+
+      document.getElementById('import-toggle-btn').addEventListener('click', function() {
+        var ui = document.getElementById('import-ui');
+        ui.style.display = ui.style.display === 'none' ? '' : 'none';
+      });
+
+      importFile.addEventListener('change', function() {
+        var file = importFile.files[0];
+        if (!file) { importPreview.textContent = ''; importConfirm.style.display = 'none'; return; }
+        var reader = new FileReader();
+        reader.onload = function(e) {
+          var lines = e.target.result.split(/\\r?\\n/).filter(function(l) { return l.trim(); });
+          if (lines.length < 2) { importPreview.textContent = 'File must have a header + data rows'; return; }
+          var headers = lines[0].split(',').map(function(h) { return h.trim().replace(/^"|"$/g, ''); });
+          importPreview.innerHTML = '<strong>' + (lines.length - 1) + ' rows</strong> — Columns: ' + headers.map(function(h) { return escHtml(h); }).join(', ');
+          importConfirm.style.display = '';
+        };
+        reader.readAsText(file);
+      });
+
+      importConfirm.addEventListener('click', function() {
+        var file = importFile.files[0];
+        if (!file) return;
+        importConfirm.disabled = true;
+        importConfirm.textContent = 'Importing...';
+        var fd = new FormData();
+        fd.append('file', file);
+        fetch('/api/jobs/' + jobId + '/import', { method: 'POST', body: fd })
+          .then(function(r) { return r.json(); })
+          .then(function(data) {
+            importConfirm.disabled = false;
+            importConfirm.textContent = 'Confirm Import';
+            if (data.error) { importResult.innerHTML = '<span style="color:var(--danger)">' + escHtml(data.error) + '</span>'; return; }
+            var msg = '<span style="color:var(--success)">' + data.imported + ' imported (' + data.created + ' new, ' + data.updated + ' updated)</span>';
+            if (data.unmapped && data.unmapped.length) msg += '<br><span style="color:var(--warning)">Unmapped columns: ' + data.unmapped.join(', ') + '</span>';
+            if (data.errors && data.errors.length) msg += '<br><span style="color:var(--danger)">' + data.errors.slice(0, 5).join('<br>') + '</span>';
+            importResult.innerHTML = msg;
+            load();
+          });
+      });
+    }
 
     // --- Cabinet metadata modal ---
     function openCabModal(cabId) {

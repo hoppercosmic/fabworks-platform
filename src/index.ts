@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage, workbenchPage, fixitPage, myWorkbenchPage, qrPage, stationMenuPage, profilePage, stagingPage } from "./ui/index";
+import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage, workbenchPage, fixitPage, myWorkbenchPage, qrPage, stationMenuPage, profilePage, stagingPage, cabinetDetailPage } from "./ui/index";
 import { SERVICE_WORKER_JS } from "./offline";
 
 // --- Types ---
@@ -23,6 +23,15 @@ type StationMenu = {
   minRole: UserRole;
 };
 
+type PartPropertyDef = {
+  key: string;
+  label: string;
+  type: "text" | "number" | "select";
+  unit?: string;
+  options?: string[];
+  group?: string;
+};
+
 type TenantConfig = {
   shop_type: string;
   entity_labels: { l1: string; l2: string; l3: string };
@@ -30,6 +39,7 @@ type TenantConfig = {
   l3_statuses: string[];
   l3_terminal_status: string;
   station_menus: StationMenu[];
+  part_properties: PartPropertyDef[];
 };
 
 type UserRole = "user" | "lead" | "supervisor" | "admin";
@@ -44,7 +54,7 @@ type SessionUser = {
   home_page: HomePage;
 };
 
-export type { TenantConfig, StationDef, StationMenu, UserRole, SessionUser };
+export type { TenantConfig, StationDef, StationMenu, PartPropertyDef, UserRole, SessionUser };
 
 // --- Shop Templates ---
 
@@ -69,6 +79,15 @@ const SHOP_TEMPLATES: Record<string, Omit<TenantConfig, "shop_type">> = {
       { slug: "waterspider", name: "WS", icon: "flow", station_slugs: ["staging"], features: ["notes"], minRole: "user" },
       { slug: "warehouse", name: "Warehouse", icon: "box", station_slugs: ["shop_floor"], features: ["notes"], minRole: "user" },
     ],
+    part_properties: [
+      { key: "width", label: "Width", type: "number", unit: "in", group: "Dimensions" },
+      { key: "height", label: "Height", type: "number", unit: "in", group: "Dimensions" },
+      { key: "depth", label: "Depth", type: "number", unit: "in", group: "Dimensions" },
+      { key: "material", label: "Material", type: "select", options: ["Maple", "Cherry", "Oak", "MDF", "Plywood", "Melamine"], group: "Materials" },
+      { key: "finish", label: "Finish", type: "select", options: ["Natural", "Stain", "Paint", "Lacquer", "Thermofoil"], group: "Materials" },
+      { key: "edge_banding", label: "Edge Banding", type: "select", options: ["None", "PVC", "Wood", "Veneer", "ABS"], group: "Materials" },
+      { key: "hardware", label: "Hardware", type: "text", group: "Hardware" },
+    ],
   },
   metal: {
     entity_labels: { l1: "Project", l2: "Batch", l3: "Part" },
@@ -87,6 +106,15 @@ const SHOP_TEMPLATES: Record<string, Omit<TenantConfig, "shop_type">> = {
       { slug: "fab", name: "Fab", icon: "wrench", station_slugs: ["cutting", "welding", "grinding"], features: ["kpi", "takt", "notes"], minRole: "user" },
       { slug: "finish", name: "Finish", icon: "paint", station_slugs: ["coating", "inspection"], features: ["kpi", "notes"], minRole: "user" },
       { slug: "shipping", name: "Ship", icon: "box", station_slugs: ["shipping"], features: ["notes"], minRole: "user" },
+    ],
+    part_properties: [
+      { key: "width", label: "Width", type: "number", unit: "in", group: "Dimensions" },
+      { key: "height", label: "Height", type: "number", unit: "in", group: "Dimensions" },
+      { key: "length", label: "Length", type: "number", unit: "in", group: "Dimensions" },
+      { key: "gauge", label: "Gauge", type: "select", options: ["10", "12", "14", "16", "18", "20"], group: "Materials" },
+      { key: "material_type", label: "Material", type: "select", options: ["Steel", "Aluminum", "Stainless", "Galvanized"], group: "Materials" },
+      { key: "weld_type", label: "Weld Type", type: "select", options: ["MIG", "TIG", "Stick", "Spot"], group: "Process" },
+      { key: "surface_treatment", label: "Surface", type: "select", options: ["Powder Coat", "Paint", "Anodize", "Raw", "Galvanize"], group: "Process" },
     ],
   },
   wood: {
@@ -107,6 +135,14 @@ const SHOP_TEMPLATES: Record<string, Omit<TenantConfig, "shop_type">> = {
       { slug: "mill", name: "Mill", icon: "cpu", station_slugs: ["milling", "sanding"], features: ["kpi", "takt", "notes"], minRole: "user" },
       { slug: "finish", name: "Finish", icon: "paint", station_slugs: ["staining", "drying"], features: ["kpi", "notes"], minRole: "user" },
       { slug: "assembly", name: "Assembly", icon: "wrench", station_slugs: ["assembly", "qc", "packing"], features: ["kpi", "takt", "notes"], minRole: "user" },
+    ],
+    part_properties: [
+      { key: "width", label: "Width", type: "number", unit: "in", group: "Dimensions" },
+      { key: "height", label: "Height", type: "number", unit: "in", group: "Dimensions" },
+      { key: "depth", label: "Depth", type: "number", unit: "in", group: "Dimensions" },
+      { key: "species", label: "Species", type: "select", options: ["Walnut", "Oak", "Maple", "Cherry", "Ash", "Pine"], group: "Materials" },
+      { key: "finish", label: "Finish", type: "select", options: ["Oil", "Wax", "Lacquer", "Poly", "Stain", "Raw"], group: "Materials" },
+      { key: "joint_type", label: "Joinery", type: "select", options: ["Mortise & Tenon", "Dovetail", "Pocket Screw", "Butt", "Dowel", "Biscuit"], group: "Joinery" },
     ],
   },
 };
@@ -135,17 +171,20 @@ async function loadConfig(db: D1Database): Promise<TenantConfig> {
     ).run();
     cachedConfig = { shop_type: "cabinet", ...tpl };
   } else {
+    const shopType = row.shop_type as string;
+    const tpl = SHOP_TEMPLATES[shopType] || SHOP_TEMPLATES.cabinet;
     cachedConfig = {
-      shop_type: row.shop_type as string,
+      shop_type: shopType,
       entity_labels: JSON.parse(row.entity_labels as string),
       stations: JSON.parse(row.stations as string),
       l3_statuses: JSON.parse(row.l3_statuses as string),
       l3_terminal_status: row.l3_terminal_status as string,
       station_menus: JSON.parse((row.station_menus as string) || "[]"),
+      part_properties: tpl.part_properties,
     };
   }
   cacheTime = Date.now();
-  return cachedConfig;
+  return cachedConfig!;
 }
 
 // --- Auth Helpers ---
@@ -515,6 +554,110 @@ app.get("/api/jobs/:jobId/cabinets", async (c) => {
   ).bind(jobId).all();
   return c.json(result.results);
 });
+
+// --- CSV Import ---
+
+app.post("/api/jobs/:jobId/import", requireAuth("lead"), async (c) => {
+  const jobId = parseInt(c.req.param("jobId"));
+  const config = c.get("config");
+  const propDefs = config.part_properties || [];
+
+  const formData = await c.req.formData();
+  const file = formData.get("file") as File | null;
+  if (!file || typeof file === "string") return c.json({ error: "No CSV file provided" }, 400);
+
+  const text = await file.text();
+  const lines = text.split(/\r?\n/).filter((l: string) => l.trim());
+  if (lines.length < 2) return c.json({ error: "CSV must have a header row and at least one data row" }, 400);
+
+  const headers = lines[0].split(",").map((h: string) => h.trim().replace(/^"|"$/g, ""));
+  const numCol = headers.findIndex((h: string) => /^(cabinet.?number|number|#|part.?num)/i.test(h));
+  if (numCol === -1) return c.json({ error: "CSV must have a cabinet_number column (or 'Number', '#', 'Part Num')" }, 400);
+
+  const labelCol = headers.findIndex((h: string) => /^(label|name|description)/i.test(h));
+  const bucketCol = headers.findIndex((h: string) => /^(bucket|group|room)/i.test(h));
+
+  const propMap: { colIdx: number; key: string }[] = [];
+  const unmapped: string[] = [];
+  headers.forEach((h: string, idx: number) => {
+    if (idx === numCol || idx === labelCol || idx === bucketCol) return;
+    const def = propDefs.find((d) => d.key.toLowerCase() === h.toLowerCase() || d.label.toLowerCase() === h.toLowerCase());
+    if (def) propMap.push({ colIdx: idx, key: def.key });
+    else unmapped.push(h);
+  });
+
+  let imported = 0, created = 0, updated = 0;
+  const errors: string[] = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = parseCSVRow(lines[i]);
+    const cabNum = parseInt(cols[numCol]);
+    if (isNaN(cabNum)) { errors.push(`Row ${i + 1}: invalid cabinet number "${cols[numCol]}"`); continue; }
+
+    let cab = await c.env.DB.prepare(
+      "SELECT id, properties FROM cabinets WHERE job_id = ? AND cabinet_number = ?"
+    ).bind(jobId, cabNum).first<{ id: number; properties: string }>();
+
+    if (!cab) {
+      const label = labelCol >= 0 ? cols[labelCol] || null : null;
+      let bucketId: number | null = null;
+      if (bucketCol >= 0 && cols[bucketCol]) {
+        const b = await c.env.DB.prepare(
+          "SELECT id FROM buckets WHERE job_id = ? AND name = ?"
+        ).bind(jobId, cols[bucketCol]).first<{ id: number }>();
+        if (b) bucketId = b.id;
+      }
+      const newCab = await c.env.DB.prepare(
+        "INSERT INTO cabinets (job_id, bucket_id, cabinet_number, label) VALUES (?, ?, ?, ?) RETURNING id"
+      ).bind(jobId, bucketId, cabNum, label).first<{ id: number }>();
+      if (!newCab) { errors.push(`Row ${i + 1}: failed to create cabinet #${cabNum}`); continue; }
+      cab = { id: newCab.id, properties: "{}" };
+      created++;
+    } else {
+      updated++;
+    }
+
+    const existing = JSON.parse(cab.properties || "{}");
+    for (const pm of propMap) {
+      const val = cols[pm.colIdx];
+      if (val !== undefined && val !== "") {
+        const def = propDefs.find((d) => d.key === pm.key);
+        existing[pm.key] = def?.type === "number" ? parseFloat(val) || val : val;
+      }
+    }
+
+    if (labelCol >= 0 && cols[labelCol]) {
+      await c.env.DB.prepare("UPDATE cabinets SET label = ? WHERE id = ?").bind(cols[labelCol], cab.id).run();
+    }
+
+    await c.env.DB.prepare("UPDATE cabinets SET properties = ? WHERE id = ?").bind(JSON.stringify(existing), cab.id).run();
+    imported++;
+  }
+
+  await c.env.DB.prepare("UPDATE jobs SET cabinet_count = (SELECT COUNT(*) FROM cabinets WHERE job_id = ?) WHERE id = ?").bind(jobId, jobId).run();
+
+  return c.json({ imported, created, updated, errors, unmapped });
+});
+
+function parseCSVRow(line: string): string[] {
+  const result: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
+      else inQuotes = !inQuotes;
+    } else if (ch === "," && !inQuotes) {
+      result.push(current.trim());
+      current = "";
+    } else {
+      current += ch;
+    }
+  }
+  result.push(current.trim());
+  return result;
+}
 
 // --- Scan (the core endpoint) ---
 
@@ -1141,6 +1284,64 @@ app.get("/api/stations/:slug/items", async (c) => {
   const binds = (laterStations.length > 0 && !date) ? [slug, ...dateBinds, ...laterStations] : [slug, ...dateBinds];
   const result = await c.env.DB.prepare(query).bind(...binds).all();
   return c.json({ level: "l3", items: result.results });
+});
+
+// --- Cabinet Detail ---
+
+app.get("/api/cabinets/:id", requireAuth(), async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  const cabinet = await c.env.DB.prepare(
+    `SELECT c.*, b.name as bucket_name, j.job_number, j.job_name
+     FROM cabinets c
+     LEFT JOIN buckets b ON c.bucket_id = b.id
+     LEFT JOIN jobs j ON c.job_id = j.id
+     WHERE c.id = ?`
+  ).bind(id).first();
+  if (!cabinet) return c.json({ error: "Cabinet not found" }, 404);
+
+  const scans = await c.env.DB.prepare(
+    "SELECT station, scanned_by, scanned_at FROM scans WHERE cabinet_id = ? ORDER BY scanned_at DESC LIMIT 20"
+  ).bind(id).all();
+
+  const builds = await c.env.DB.prepare(
+    `SELECT bs.started_at, bs.completed_at, bs.total_paused_seconds, u.name as user_name
+     FROM build_sessions bs LEFT JOIN users u ON bs.user_id = u.id
+     WHERE bs.cabinet_id = ? ORDER BY bs.started_at DESC`
+  ).bind(id).all();
+
+  const fixits = await c.env.DB.prepare(
+    `SELECT fr.root_cause, fr.description, fr.status, fr.created_at, fr.photo_key,
+            u.name as resolved_by
+     FROM fixit_requests fr LEFT JOIN users u ON fr.resolved_by = u.id
+     WHERE fr.cabinet_id = ? ORDER BY fr.created_at DESC`
+  ).bind(id).all();
+
+  const notes = await c.env.DB.prepare(
+    `SELECT n.title, n.content, n.created_at, u.name as author_name
+     FROM notes n LEFT JOIN users u ON n.author_id = u.id
+     WHERE n.context_type = 'cabinet' AND n.context_id = ? ORDER BY n.created_at DESC`
+  ).bind(id).all();
+
+  return c.json({
+    cabinet,
+    job: { id: cabinet.job_id, job_number: cabinet.job_number, job_name: cabinet.job_name },
+    bucket: cabinet.bucket_id ? { id: cabinet.bucket_id, name: cabinet.bucket_name } : null,
+    scans: scans.results,
+    build_sessions: builds.results,
+    fixit_requests: fixits.results,
+    notes: notes.results,
+  });
+});
+
+app.put("/api/cabinets/:id/properties", requireAuth("lead"), async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  const body = await c.req.json<{ properties: Record<string, string | number> }>();
+  const existing = await c.env.DB.prepare("SELECT properties FROM cabinets WHERE id = ?").bind(id).first<{ properties: string }>();
+  if (!existing) return c.json({ error: "Cabinet not found" }, 404);
+  const current = JSON.parse(existing.properties || "{}");
+  const merged = { ...current, ...body.properties };
+  await c.env.DB.prepare("UPDATE cabinets SET properties = ? WHERE id = ?").bind(JSON.stringify(merged), id).run();
+  return c.json({ ok: true, properties: merged });
 });
 
 // --- Staging location ---
@@ -1783,6 +1984,7 @@ app.get("/workbench", requireAuth(), (c) => c.html(workbenchPage(c.get("config")
 app.get("/fixit", requireAuth(), (c) => c.html(fixitPage(c.get("config"), c.get("user")!)));
 app.get("/staging", requireAuth(), (c) => c.html(stagingPage(c.get("config"), c.get("user")!)));
 app.get("/profile", requireAuth(), (c) => c.html(profilePage(c.get("config"), c.get("user")!)));
+app.get("/cabinet/:id", requireAuth(), (c) => c.html(cabinetDetailPage(c.get("config"), c.get("user")!)));
 
 app.get("/menu/:slug", requireAuth(), (c) => {
   const config = c.get("config");
