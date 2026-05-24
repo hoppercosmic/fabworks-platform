@@ -7,7 +7,7 @@ export function profilePage(config: TenantConfig, user: SessionUser): string {
   ).join('');
 
   return page("Profile", `
-    main { padding: 16px; max-width: 500px; width: 100%; margin: 0 auto; }
+    main { gap: 14px; }
     .profile-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
     .profile-header { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; padding-bottom: 16px; border-bottom: 1px solid var(--border); }
     .profile-avatar { width: 56px; height: 56px; border-radius: 50%; background: var(--accent); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 1.3rem; font-weight: 700; flex-shrink: 0; }

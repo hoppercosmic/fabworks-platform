@@ -3,7 +3,7 @@ import { page, SHARED_JS } from "./layout";
 
 export function kpiPage(config: TenantConfig, user: SessionUser): string {
   return page("Assembler KPI", `
-    main { flex: 1; padding: 16px; max-width: 1100px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+    main { gap: 14px; }
     .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
     .controls select { width: auto; padding: 8px 12px; font-size: 0.85rem; }
     .controls .label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
@@ -257,7 +257,7 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
 
 export function taktPage(config: TenantConfig, user: SessionUser): string {
   return page("Takt Time", `
-    main { flex: 1; padding: 16px; max-width: 900px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+    main { gap: 14px; }
     .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
     .controls select { width: auto; padding: 8px 12px; font-size: 0.85rem; }
     .controls .label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }

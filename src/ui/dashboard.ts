@@ -6,7 +6,7 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
   const isLead = ["lead", "supervisor", "admin"].includes(user.role);
 
   return page("Dashboard", `
-    main { padding: 16px; max-width: 900px; width: 100%; margin: 0 auto; }
+    main { gap: 14px; }
 
     /* Splash mode */
     .splash { display: flex; flex-direction: column; gap: 16px; }

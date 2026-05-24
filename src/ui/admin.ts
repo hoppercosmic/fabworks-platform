@@ -5,7 +5,7 @@ export function adminPage(config: TenantConfig, user: SessionUser): string {
   const ROLES: string[] = ["user", "lead", "supervisor", "admin"];
   const SHOP_TYPES: string[] = ["cabinet", "metal", "wood"];
   return page("Admin", `
-    main { flex: 1; padding: 16px; max-width: 700px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+    main { gap: 14px; }
     .tabs { display: flex; gap: 0; border-bottom: 2px solid var(--border); }
     .tab {
       padding: 10px 20px; font-size: 0.9rem; font-weight: 600; color: var(--muted);

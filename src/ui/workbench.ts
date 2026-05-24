@@ -3,7 +3,7 @@ import { page, displayStatusJS, SHARED_JS } from "./layout";
 
 export function workbenchPage(config: TenantConfig, user: SessionUser): string {
   return page("Build", `
-    .wb-start { padding: 16px; max-width: 480px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+    .wb-start { display: flex; flex-direction: column; gap: 12px; }
     .wb-start h3 { font-size: 1rem; font-weight: 700; margin: 0; }
     .wb-start .section-label { font-size: 0.75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
     .wb-cab-list { display: flex; flex-direction: column; gap: 6px; }
@@ -44,7 +44,7 @@ export function workbenchPage(config: TenantConfig, user: SessionUser): string {
     .btn-fixit { background: var(--error); color: #fff; }
     .fixit-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 200; display: none; flex-direction: column; align-items: center; padding: 1rem; overflow-y: auto; }
     .fixit-overlay.active { display: flex; }
-    .fixit-form { width: 100%; max-width: 440px; margin-top: 60px; display: flex; flex-direction: column; gap: 1rem; }
+    .fixit-form { width: 100%; margin-top: 60px; display: flex; flex-direction: column; gap: 1rem; }
     .fixit-form h2 { color: var(--error); font-size: 1.3rem; text-align: center; }
     .fixit-form .close-btn { position: absolute; top: 16px; right: 16px; background: none; border: none; color: #fff; font-size: 2rem; cursor: pointer; }
     .cause-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
@@ -426,7 +426,7 @@ export function workbenchPage(config: TenantConfig, user: SessionUser): string {
 export function myWorkbenchPage(config: TenantConfig, user: SessionUser): string {
   const L3 = config.entity_labels.l3;
   return page("My Workbench", `
-    main { flex: 1; padding: 16px; max-width: 480px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+    main { gap: 14px; }
     .greeting { font-size: 1.3rem; font-weight: 700; }
     .today-stat { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--muted); }
     .today-stat .count { font-size: 1.4rem; font-weight: 700; color: var(--success); }
