@@ -57,7 +57,8 @@ function renderTopBar(currentPath: string, user: SessionUser, config: TenantConf
         const active = currentPath === `/menu/${m.slug}`;
         return `<a href="/menu/${m.slug}" class="dd-item${active ? " active" : ""}">${m.name}</a>`;
       }).join("");
-      stationsHtml = `<div class="nav-dd"><button class="nav-btn${isStationActive ? " active" : ""}" id="stations-trigger"><span class="nav-icon">${SVG_SCAN}</span><span class="nav-label">Stations</span></button><div class="nav-dropdown" id="stations-dropdown">${menuLinks}<div class="dd-divider"></div><a href="/stations" class="dd-item${currentPath === "/stations" ? " active" : ""}">Station View</a></div></div>`;
+      const stagingActive = currentPath === "/staging";
+      stationsHtml = `<div class="nav-dd"><button class="nav-btn${isStationActive || stagingActive ? " active" : ""}" id="stations-trigger"><span class="nav-icon">${SVG_SCAN}</span><span class="nav-label">Stations</span></button><div class="nav-dropdown" id="stations-dropdown">${menuLinks}<div class="dd-divider"></div><a href="/staging" class="dd-item${stagingActive ? " active" : ""}">Staging</a><a href="/stations" class="dd-item${currentPath === "/stations" ? " active" : ""}">Station View</a></div></div>`;
     }
   }
 

@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage, workbenchPage, fixitPage, myWorkbenchPage, qrPage, stationMenuPage, profilePage } from "./ui/index";
+import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage, workbenchPage, fixitPage, myWorkbenchPage, qrPage, stationMenuPage, profilePage, stagingPage } from "./ui/index";
 
 // --- Types ---
 
@@ -1271,6 +1271,76 @@ app.get("/api/stations/:slug/staging", async (c) => {
   return c.json({ jobs: Array.from(jobMap.values()) });
 });
 
+// --- Search (find cabinets across the shop) ---
+
+app.get("/api/search", requireAuth(), async (c) => {
+  const q = (c.req.query("q") || "").trim();
+  if (q.length < 2) return c.json({ results: [] });
+  const config = c.get("config");
+
+  const rows = await c.env.DB.prepare(`
+    SELECT cab.id, cab.cabinet_number, cab.label, cab.status, cab.flags,
+           cab.staging_location, cab.accessories, cab.notes,
+           j.id as job_id, j.job_number, j.job_name,
+           b.name as bucket_name,
+           (SELECT s.station FROM scans s WHERE s.cabinet_id = cab.id ORDER BY s.scanned_at DESC LIMIT 1) as last_station,
+           (SELECT s.scanned_at FROM scans s WHERE s.cabinet_id = cab.id ORDER BY s.scanned_at DESC LIMIT 1) as last_scan_at
+    FROM cabinets cab
+    JOIN jobs j ON cab.job_id = j.id
+    LEFT JOIN buckets b ON cab.bucket_id = b.id
+    WHERE j.status = 'active'
+    AND (
+      CAST(cab.cabinet_number AS TEXT) LIKE ?
+      OR cab.label LIKE ?
+      OR j.job_number LIKE ?
+      OR j.job_name LIKE ?
+    )
+    ORDER BY j.job_number, cab.cabinet_number
+    LIMIT 50
+  `).bind(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`).all();
+
+  return c.json({ results: rows.results });
+});
+
+// --- Staging progress (all active jobs) ---
+
+app.get("/api/staging/progress", requireAuth(), async (c) => {
+  const config = c.get("config");
+  const terminalStation = config.stations.find((s) => s.sets_status === config.l3_terminal_status);
+  if (!terminalStation) return c.json({ jobs: [] });
+
+  const rows = await c.env.DB.prepare(`
+    SELECT j.id as job_id, j.job_number, j.job_name,
+           cab.id as cab_id, cab.cabinet_number, cab.label, cab.status, cab.flags,
+           cab.staging_location, cab.accessories, cab.notes, cab.assembly_sheet_url,
+           b.name as bucket_name,
+           (SELECT MAX(s.scanned_at) FROM scans s WHERE s.cabinet_id = cab.id AND s.station = ?) as staged_at
+    FROM jobs j
+    JOIN cabinets cab ON cab.job_id = j.id
+    LEFT JOIN buckets b ON cab.bucket_id = b.id
+    WHERE j.status = 'active'
+    ORDER BY j.job_number, cab.cabinet_number
+  `).bind(terminalStation.slug).all();
+
+  const jobMap = new Map<number, { id: number; job_number: string; job_name: string; total: number; staged: number; cabinets: unknown[] }>();
+  for (const r of rows.results as Record<string, unknown>[]) {
+    const jid = r.job_id as number;
+    if (!jobMap.has(jid)) {
+      jobMap.set(jid, { id: jid, job_number: r.job_number as string, job_name: r.job_name as string, total: 0, staged: 0, cabinets: [] });
+    }
+    const job = jobMap.get(jid)!;
+    job.total++;
+    if (r.staged_at) job.staged++;
+    job.cabinets.push({
+      id: r.cab_id, cabinet_number: r.cabinet_number, label: r.label,
+      status: r.status, flags: r.flags, staging_location: r.staging_location,
+      accessories: r.accessories, notes: r.notes, assembly_sheet_url: r.assembly_sheet_url,
+      bucket_name: r.bucket_name, staged_at: r.staged_at,
+    });
+  }
+  return c.json({ jobs: Array.from(jobMap.values()) });
+});
+
 // --- Build Timer ---
 
 app.post("/api/build/start", requireAuth(), async (c) => {
@@ -1672,7 +1742,7 @@ app.get("/", requireAuth(), (c) => {
   switch (user.home_page) {
     case "workbench": return c.html(myWorkbenchPage(config, user));
     case "fixit": return c.redirect("/fixit");
-    case "staging": return c.redirect("/stations");
+    case "staging": return c.redirect("/staging");
     case "dashboard": return c.redirect("/dashboard");
     default: return c.html(scanPage(config, user));
   }
@@ -1689,6 +1759,7 @@ app.get("/takt", requireAuth("lead"), (c) => c.html(taktPage(c.get("config"), c.
 app.get("/admin", requireAuth("admin"), (c) => c.html(adminPage(c.get("config"), c.get("user")!)));
 app.get("/workbench", requireAuth(), (c) => c.html(workbenchPage(c.get("config"), c.get("user")!)));
 app.get("/fixit", requireAuth(), (c) => c.html(fixitPage(c.get("config"), c.get("user")!)));
+app.get("/staging", requireAuth(), (c) => c.html(stagingPage(c.get("config"), c.get("user")!)));
 app.get("/profile", requireAuth(), (c) => c.html(profilePage(c.get("config"), c.get("user")!)));
 
 app.get("/menu/:slug", requireAuth(), (c) => {
