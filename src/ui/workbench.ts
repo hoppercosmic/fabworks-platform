@@ -1,10 +1,24 @@
 import type { TenantConfig, SessionUser } from "../index";
-import { page, stationNamesJS, displayStatusJS, STATUS_COLOR_JS, ROLE_LEVELS, SHARED_JS } from "./layout";
+import { page, displayStatusJS, SHARED_JS } from "./layout";
 
 export function workbenchPage(config: TenantConfig, user: SessionUser): string {
   return page("Build", `
-    .wb-empty { text-align: center; padding: 3rem 1rem; color: var(--muted); }
-    .wb-empty a { color: var(--accent); }
+    .wb-start { padding: 16px; max-width: 480px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
+    .wb-start h3 { font-size: 1rem; font-weight: 700; margin: 0; }
+    .wb-start .section-label { font-size: 0.75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+    .wb-cab-list { display: flex; flex-direction: column; gap: 6px; }
+    .wb-cab-row {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 12px; background: var(--surface); border: 2px solid var(--border);
+      border-radius: 8px; cursor: pointer; transition: all 0.15s;
+    }
+    .wb-cab-row:active { transform: scale(0.98); }
+    .wb-cab-row.selected { border-color: var(--accent); background: rgba(59,130,246,0.1); }
+    .wb-cab-row .cab-name { font-weight: 600; font-size: 0.9rem; }
+    .wb-cab-row .cab-sub { font-size: 0.75rem; color: var(--muted); margin-top: 2px; }
+    .wb-start-btn { width: 100%; padding: 14px; font-size: 1rem; font-weight: 600; border: none; border-radius: var(--radius); background: var(--accent); color: #fff; cursor: pointer; }
+    .wb-start-btn:disabled { opacity: 0.4; cursor: default; }
+    .wb-empty-msg { text-align: center; padding: 1.5rem; color: var(--muted); font-size: 0.85rem; }
     .timer-card { text-align: center; padding: 1.5rem; }
     .timer-display { font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace; font-size: 3rem; font-weight: 700; letter-spacing: 2px; color: #fff; transition: color 0.3s; }
     .timer-display.paused { color: var(--warning, #f59e0b); }
@@ -46,9 +60,21 @@ export function workbenchPage(config: TenantConfig, user: SessionUser): string {
     .fixit-sent { text-align: center; color: var(--success); font-weight: 600; font-size: 1.1rem; padding: 1rem; }
   `, `
     <div id="loading" style="text-align:center;padding:3rem;color:var(--muted);">Loading...</div>
-    <div id="no-session" class="wb-empty" style="display:none">
-      <p>No active build session.</p>
-      <p style="margin-top:0.75rem"><a href="/">Go to Scan to start a build</a></p>
+    <div id="no-session" style="display:none">
+      <div class="wb-start">
+        <h3>Start a Build</h3>
+        <div class="card">
+          <label>${config.entity_labels.l1}</label>
+          <input type="text" id="wb-job-input" placeholder="${config.entity_labels.l1} number" inputmode="numeric" autocomplete="off">
+          <div id="wb-job-info" style="margin-top:8px;font-size:0.85rem;color:var(--muted)"></div>
+        </div>
+        <div id="wb-cab-section" style="display:none">
+          <div class="section-label">Select ${config.entity_labels.l3}</div>
+          <div class="wb-cab-list" id="wb-cab-list"></div>
+        </div>
+        <button class="wb-start-btn" id="wb-start-btn" disabled>Start Build</button>
+        <div id="wb-error" style="display:none;color:var(--error);font-size:0.85rem;text-align:center"></div>
+      </div>
     </div>
     <div id="workbench" style="display:none">
       <div class="card timer-card">
@@ -92,6 +118,7 @@ export function workbenchPage(config: TenantConfig, user: SessionUser): string {
     </div>
   `, `
     ${SHARED_JS}
+    ${displayStatusJS(config)}
 
     var sessionId = null;
     var currentCabinetId = null;
@@ -148,12 +175,101 @@ export function workbenchPage(config: TenantConfig, user: SessionUser): string {
       timerInterval = setInterval(updateTimer, 1000);
     }
 
+    var wbJobInput = document.getElementById('wb-job-input');
+    var wbJobInfo = document.getElementById('wb-job-info');
+    var wbCabSection = document.getElementById('wb-cab-section');
+    var wbCabList = document.getElementById('wb-cab-list');
+    var wbStartBtn = document.getElementById('wb-start-btn');
+    var wbError = document.getElementById('wb-error');
+    var wbSelectedCabId = null;
+    var wbDebounce = null;
+
+    wbJobInput.addEventListener('input', function() {
+      clearTimeout(wbDebounce);
+      wbSelectedCabId = null;
+      wbJobInfo.textContent = '';
+      wbCabSection.style.display = 'none';
+      wbStartBtn.disabled = true;
+      wbError.style.display = 'none';
+      var val = wbJobInput.value.trim();
+      if (val.length >= 3) {
+        wbDebounce = setTimeout(function() { wbLookup(val); }, 300);
+      }
+    });
+
+    function wbLookup(num) {
+      wbJobInfo.textContent = 'Looking up...';
+      fetch('/api/jobs?status=active').then(function(r) { return r.json(); }).then(function(jobs) {
+        var job = jobs.find(function(j) { return j.job_number === num; });
+        if (!job) {
+          wbJobInfo.textContent = 'No active ${config.entity_labels.l1.toLowerCase()} found';
+          return;
+        }
+        fetch('/api/jobs/' + job.id).then(function(r) { return r.json(); }).then(function(detail) {
+          wbJobInfo.innerHTML = '<strong>' + escHtml(detail.job_name) + '</strong>';
+          var cabs = detail.cabinets || [];
+          if (cabs.length === 0) {
+            wbCabSection.style.display = 'block';
+            wbCabList.innerHTML = '<div class="wb-empty-msg">No ${config.entity_labels.l3.toLowerCase()}s in this ${config.entity_labels.l1.toLowerCase()}</div>';
+            return;
+          }
+          wbCabSection.style.display = 'block';
+          wbCabList.innerHTML = cabs.map(function(c) {
+            var sub = c.label || '';
+            if (c.status) sub += (sub ? ' — ' : '') + displayStatus(c.status);
+            return '<div class="wb-cab-row" data-id="' + c.id + '">'
+              + '<div><div class="cab-name">${config.entity_labels.l3} #' + c.cabinet_number + '</div>'
+              + (sub ? '<div class="cab-sub">' + escHtml(sub) + '</div>' : '')
+              + '</div><span style="color:var(--accent);font-weight:700">→</span></div>';
+          }).join('');
+
+          wbCabList.querySelectorAll('.wb-cab-row').forEach(function(row) {
+            row.addEventListener('click', function() {
+              wbSelectedCabId = parseInt(row.dataset.id);
+              wbCabList.querySelectorAll('.wb-cab-row').forEach(function(r) {
+                r.classList.toggle('selected', r.dataset.id == wbSelectedCabId);
+              });
+              wbStartBtn.disabled = false;
+              wbError.style.display = 'none';
+            });
+          });
+        });
+      });
+    }
+
+    wbStartBtn.addEventListener('click', function() {
+      if (!wbSelectedCabId || wbStartBtn.disabled) return;
+      wbStartBtn.disabled = true;
+      wbStartBtn.textContent = 'Starting...';
+      wbError.style.display = 'none';
+      fetch('/api/build/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cabinet_id: wbSelectedCabId }),
+      }).then(function(r) {
+        return r.json().then(function(d) { return { ok: r.ok, data: d }; });
+      }).then(function(r) {
+        if (r.ok) {
+          document.getElementById('no-session').style.display = 'none';
+          fetch('/api/build/active').then(function(r2) { return r2.json(); }).then(function(d) {
+            if (d.session) renderSession(d.session);
+          });
+        } else {
+          wbError.textContent = r.data.error || 'Failed to start build';
+          wbError.style.display = 'block';
+          wbStartBtn.disabled = false;
+          wbStartBtn.textContent = 'Start Build';
+        }
+      });
+    });
+
     fetch('/api/build/active').then(function(r) { return r.json(); }).then(function(data) {
       if (data.session) {
         renderSession(data.session);
       } else {
         document.getElementById('loading').style.display = 'none';
         document.getElementById('no-session').style.display = 'block';
+        wbJobInput.focus();
       }
     });
 
