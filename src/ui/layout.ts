@@ -1,4 +1,5 @@
 import type { TenantConfig, StationMenu, SessionUser, UserRole } from "../index";
+import { OFFLINE_CLIENT_JS, OFFLINE_STYLES, OFFLINE_BANNER_HTML } from "../offline";
 
 // ─── Inline SVG Icons (24x24, outlined) ──────────────────
 const IC = (d: string) => `<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${d}</svg>`;
@@ -564,14 +565,15 @@ export function page(title: string, extraStyles: string, body: string, script: s
   <link rel="icon" type="image/svg+xml" href="/icon-192.svg">
   <link rel="apple-touch-icon" href="/icon-192.svg">
   <title>FabWorks — ${title}</title>
-  <style>${SHARED_STYLES}${bodyPadding}${extraStyles}</style>
+  <style>${SHARED_STYLES}${OFFLINE_STYLES}${bodyPadding}${extraStyles}</style>
 </head>
 <body>
   ${navHtml}
+  ${OFFLINE_BANNER_HTML}
   ${scannerHtml}
   ${body}
   ${cdnTags}
-  <script>${user ? USER_MENU_JS : ""}${script}</script>
+  <script>${user ? USER_MENU_JS : ""}${OFFLINE_CLIENT_JS}${script}</script>
 </body>
 </html>`;
 }

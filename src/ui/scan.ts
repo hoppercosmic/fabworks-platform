@@ -288,14 +288,18 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       }).then(function(res) {
-        return res.json().then(function(data) { return { ok: res.ok, data: data }; });
+        return res.json().then(function(data) { return { ok: res.ok, status: res.status, data: data }; });
       }).then(function(r) {
         actionInFlight = false;
-        if (r.ok) {
+        if (r.ok || r.status === 202) {
           resultDiv.className = 'result success';
-          resultDiv.innerHTML = r.data.station + '<div class="detail">' +
-            r.data.job_number + ' ' + r.data.job_name +
-            (r.data.scanned_by ? ' — ' + r.data.scanned_by : '') + '</div>';
+          if (r.status === 202) {
+            resultDiv.innerHTML = station.name + '<div class="detail">Queued — will sync when online</div>';
+          } else {
+            resultDiv.innerHTML = r.data.station + '<div class="detail">' +
+              r.data.job_number + ' ' + r.data.job_name +
+              (r.data.scanned_by ? ' — ' + r.data.scanned_by : '') + '</div>';
+          }
           selectedEntityId = null;
           fetch('/api/jobs/' + jobData.id).then(function(r2) { return r2.json(); }).then(function(detail) {
             jobData = detail;

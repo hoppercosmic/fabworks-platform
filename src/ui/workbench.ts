@@ -276,19 +276,24 @@ export function workbenchPage(config: TenantConfig, user: SessionUser): string {
     document.getElementById('pause-btn').addEventListener('click', function() {
       if (!sessionId) return;
       var action = isPaused ? 'resume' : 'pause';
-      fetch('/api/build/' + sessionId + '/' + action, { method: 'POST' })
-        .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+      var ts = new Date().toISOString();
+      fetch('/api/build/' + sessionId + '/' + action, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_timestamp: ts }),
+      }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; }); })
         .then(function(r) {
-          if (!r.ok) return;
+          if (!r.ok && r.status !== 202) return;
           if (action === 'pause') {
             isPaused = true;
             pausedAtMs = Date.now();
             document.getElementById('pause-btn').textContent = 'Resume';
             document.getElementById('pause-btn').classList.add('is-paused');
             document.getElementById('timer-display').classList.add('paused');
-            document.getElementById('timer-status').textContent = 'Paused';
+            document.getElementById('timer-status').textContent = r.status === 202 ? 'Paused (offline)' : 'Paused';
           } else {
-            totalPausedMs = (r.data.total_paused_seconds || 0) * 1000;
+            if (r.data.total_paused_seconds != null) totalPausedMs = r.data.total_paused_seconds * 1000;
+            else totalPausedMs += (Date.now() - pausedAtMs);
             isPaused = false;
             pausedAtMs = 0;
             document.getElementById('pause-btn').textContent = 'Pause';
@@ -302,20 +307,31 @@ export function workbenchPage(config: TenantConfig, user: SessionUser): string {
     document.getElementById('complete-btn').addEventListener('click', function() {
       if (!sessionId) return;
       if (!confirm('Complete this build?')) return;
-      fetch('/api/build/' + sessionId + '/complete', { method: 'POST' })
-        .then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+      var ts = new Date().toISOString();
+      fetch('/api/build/' + sessionId + '/complete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_timestamp: ts }),
+      }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; }); })
         .then(function(r) {
-          if (!r.ok) return;
+          if (!r.ok && r.status !== 202) return;
           if (timerInterval) clearInterval(timerInterval);
           document.getElementById('workbench').style.display = 'none';
           var cv = document.getElementById('complete-view');
           cv.style.display = 'block';
-          cv.innerHTML = '<div class="done-icon">✓</div>'
-            + '<div class="done-time">' + r.data.working_minutes + ' min</div>'
-            + '<div class="done-detail">Total elapsed: ' + r.data.total_minutes + ' min'
-            + (r.data.total_paused_seconds > 0 ? ' (paused ' + Math.round(r.data.total_paused_seconds / 60 * 10) / 10 + ' min)' : '')
-            + '</div>'
-            + '<a href="/">Start Next Build →</a>';
+          if (r.status === 202) {
+            cv.innerHTML = '<div class="done-icon">✓</div>'
+              + '<div class="done-time">Build Complete</div>'
+              + '<div class="done-detail">Will sync when back online</div>'
+              + '<a href="/">Start Next Build →</a>';
+          } else {
+            cv.innerHTML = '<div class="done-icon">✓</div>'
+              + '<div class="done-time">' + r.data.working_minutes + ' min</div>'
+              + '<div class="done-detail">Total elapsed: ' + r.data.total_minutes + ' min'
+              + (r.data.total_paused_seconds > 0 ? ' (paused ' + Math.round(r.data.total_paused_seconds / 60 * 10) / 10 + ' min)' : '')
+              + '</div>'
+              + '<a href="/">Start Next Build →</a>';
+          }
         });
     });
 

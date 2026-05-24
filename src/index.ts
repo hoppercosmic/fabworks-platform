@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage, workbenchPage, fixitPage, myWorkbenchPage, qrPage, stationMenuPage, profilePage, stagingPage } from "./ui/index";
+import { SERVICE_WORKER_JS } from "./offline";
 
 // --- Types ---
 
@@ -554,6 +555,15 @@ app.post("/api/scan", async (c) => {
   if (!jobId || !jobInfo) return c.json({ error: "job_number or job_id required" }, 400);
   if (jobInfo.status !== "active") {
     return c.json({ error: `Job ${jobInfo.job_number} is ${jobInfo.status}` }, 400);
+  }
+
+  // Idempotency: skip duplicate scans from offline queue replay
+  const requestId = c.req.header("X-Request-Id");
+  if (requestId && c.req.header("X-Offline-Queued")) {
+    const dupe = await c.env.DB.prepare(
+      "SELECT id FROM scans WHERE station = ? AND job_id = ? AND cabinet_id IS ? AND scanned_at > datetime('now', '-5 minutes') ORDER BY scanned_at DESC LIMIT 1"
+    ).bind(body.station, jobId, body.cabinet_id || null).first<{ id: number }>();
+    if (dupe) return c.json({ scan_id: dupe.id, deduplicated: true }, 200);
   }
 
   // Validate entity level
@@ -1413,6 +1423,7 @@ app.get("/api/build/:id", requireAuth(), async (c) => {
 app.post("/api/build/:id/pause", requireAuth(), async (c) => {
   const user = c.get("user")!;
   const id = parseInt(c.req.param("id"), 10);
+  const body = await c.req.json().catch(() => ({})) as { client_timestamp?: string };
   const session = await c.env.DB.prepare(
     "SELECT id, paused_at, completed_at, user_id FROM build_sessions WHERE id = ?"
   ).bind(id).first<{ id: number; paused_at: string | null; completed_at: string | null; user_id: number }>();
@@ -1420,13 +1431,19 @@ app.post("/api/build/:id/pause", requireAuth(), async (c) => {
   if (session.completed_at) return c.json({ error: "Session already completed" }, 400);
   if (session.paused_at) return c.json({ error: "Already paused" }, 400);
 
-  await c.env.DB.prepare("UPDATE build_sessions SET paused_at = datetime('now') WHERE id = ?").bind(id).run();
+  const useClientTs = c.req.header("X-Offline-Queued") && body.client_timestamp && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(body.client_timestamp);
+  if (useClientTs) {
+    await c.env.DB.prepare("UPDATE build_sessions SET paused_at = ? WHERE id = ?").bind(body.client_timestamp, id).run();
+  } else {
+    await c.env.DB.prepare("UPDATE build_sessions SET paused_at = datetime('now') WHERE id = ?").bind(id).run();
+  }
   return c.json({ ok: true });
 });
 
 app.post("/api/build/:id/resume", requireAuth(), async (c) => {
   const user = c.get("user")!;
   const id = parseInt(c.req.param("id"), 10);
+  const body = await c.req.json().catch(() => ({})) as { client_timestamp?: string };
   const session = await c.env.DB.prepare(
     "SELECT id, paused_at, completed_at, user_id, total_paused_seconds FROM build_sessions WHERE id = ?"
   ).bind(id).first<{ id: number; paused_at: string | null; completed_at: string | null; user_id: number; total_paused_seconds: number }>();
@@ -1434,11 +1451,12 @@ app.post("/api/build/:id/resume", requireAuth(), async (c) => {
   if (session.completed_at) return c.json({ error: "Session already completed" }, 400);
   if (!session.paused_at) return c.json({ error: "Not paused" }, 400);
 
-  const pauseDuration = await c.env.DB.prepare(
-    "SELECT CAST((julianday('now') - julianday(?)) * 86400 AS INTEGER) as secs"
-  ).bind(session.paused_at).first<{ secs: number }>();
+  const useClientTs = c.req.header("X-Offline-Queued") && body.client_timestamp && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(body.client_timestamp);
+  const resumeTime = useClientTs ? new Date(body.client_timestamp!).getTime() : Date.now();
+  const pausedAt = new Date(session.paused_at + "Z").getTime();
+  const pauseSecs = Math.max(0, Math.round((resumeTime - pausedAt) / 1000));
 
-  const newTotal = session.total_paused_seconds + (pauseDuration?.secs || 0);
+  const newTotal = session.total_paused_seconds + pauseSecs;
   await c.env.DB.prepare(
     "UPDATE build_sessions SET paused_at = NULL, total_paused_seconds = ? WHERE id = ?"
   ).bind(newTotal, id).run();
@@ -1450,23 +1468,26 @@ app.post("/api/build/:id/complete", requireAuth(), async (c) => {
   const config = c.get("config");
   const user = c.get("user")!;
   const id = parseInt(c.req.param("id"), 10);
+  const body = await c.req.json().catch(() => ({})) as { client_timestamp?: string };
   const session = await c.env.DB.prepare(
     "SELECT id, cabinet_id, job_id, paused_at, completed_at, user_id, total_paused_seconds, started_at FROM build_sessions WHERE id = ?"
   ).bind(id).first<{ id: number; cabinet_id: number; job_id: number; paused_at: string | null; completed_at: string | null; user_id: number; total_paused_seconds: number; started_at: string }>();
   if (!session || session.user_id !== user.id) return c.json({ error: "Session not found" }, 404);
-  if (session.completed_at) return c.json({ error: "Session already completed" }, 400);
+  if (session.completed_at) return c.json({ ok: true, already_completed: true }, 200);
+
+  const useClientTs = c.req.header("X-Offline-Queued") && body.client_timestamp && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(body.client_timestamp);
+  const completeTime = useClientTs ? new Date(body.client_timestamp!).getTime() : Date.now();
 
   let totalPaused = session.total_paused_seconds;
   if (session.paused_at) {
-    const pauseDuration = await c.env.DB.prepare(
-      "SELECT CAST((julianday('now') - julianday(?)) * 86400 AS INTEGER) as secs"
-    ).bind(session.paused_at).first<{ secs: number }>();
-    totalPaused += pauseDuration?.secs || 0;
+    const pausedAt = new Date(session.paused_at + "Z").getTime();
+    totalPaused += Math.max(0, Math.round((completeTime - pausedAt) / 1000));
   }
 
+  const completedIso = new Date(completeTime).toISOString().replace("T", " ").slice(0, 19);
   await c.env.DB.prepare(
-    "UPDATE build_sessions SET completed_at = datetime('now'), paused_at = NULL, total_paused_seconds = ? WHERE id = ?"
-  ).bind(totalPaused, id).run();
+    "UPDATE build_sessions SET completed_at = ?, paused_at = NULL, total_paused_seconds = ? WHERE id = ?"
+  ).bind(completedIso, totalPaused, id).run();
 
   const assemblyComplete = config.stations.find((s) => s.sets_status === "assembled");
   if (assemblyComplete) {
@@ -1729,6 +1750,7 @@ app.get("/manifest.json", (c) => {
 
 app.get("/icon-192.svg", (c) => c.body(PWA_ICON, 200, { "Content-Type": "image/svg+xml" }));
 app.get("/icon-512.svg", (c) => c.body(PWA_ICON, 200, { "Content-Type": "image/svg+xml" }));
+app.get("/sw.js", (c) => c.body(SERVICE_WORKER_JS, 200, { "Content-Type": "application/javascript", "Cache-Control": "no-cache", "Service-Worker-Allowed": "/" }));
 
 // --- Pages ---
 
