@@ -1,5 +1,5 @@
 import type { TenantConfig, StationMenu, SessionUser } from "../index";
-import { page, stationNamesJS, displayStatusJS, STATUS_COLOR_JS } from "./layout";
+import { page, stationNamesJS, displayStatusJS, STATUS_COLOR_JS, SHARED_JS } from "./layout";
 import { NOTES_STYLES, notesHTML, notesJS } from "./components/notes";
 
 export function stationMenuPage(config: TenantConfig, user: SessionUser, menu: StationMenu): string {
@@ -35,15 +35,8 @@ export function stationMenuPage(config: TenantConfig, user: SessionUser, menu: S
     ${displayStatusJS(config)}
     ${STATUS_COLOR_JS}
 
+    ${SHARED_JS}
     var MENU_STATIONS = ${stationSlugs};
-
-    function timeAgo(date) {
-      var s = Math.floor((Date.now() - date.getTime()) / 1000);
-      if (s < 60) return 'just now';
-      if (s < 3600) return Math.floor(s / 60) + 'm ago';
-      if (s < 86400) return Math.floor(s / 3600) + 'h ago';
-      return Math.floor(s / 86400) + 'd ago';
-    }
 
     var badgeDiv = document.getElementById('station-badges');
     MENU_STATIONS.forEach(function(slug) {

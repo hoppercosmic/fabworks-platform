@@ -41,6 +41,13 @@ export function notesJS(containerId: string, contextType: string, contextId: str
       d.textContent = str;
       return d.innerHTML;
     }
+    function notesTimeAgo_${containerId}(date) {
+      var s = Math.floor((Date.now() - date.getTime()) / 1000);
+      if (s < 60) return 'just now';
+      if (s < 3600) return Math.floor(s / 60) + 'm ago';
+      if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+      return Math.floor(s / 86400) + 'd ago';
+    }
     function loadNotes_${containerId}() {
       var list = document.getElementById('${containerId}-list');
       fetch('/api/notes?context_type=${contextType}&context_id=${contextId}')
@@ -51,7 +58,7 @@ export function notesJS(containerId: string, contextType: string, contextId: str
             return;
           }
           list.innerHTML = notes.map(function(n) {
-            var ago = timeAgo(new Date(n.created_at + 'Z'));
+            var ago = notesTimeAgo_${containerId}(new Date(n.created_at + 'Z'));
             return '<div class="note-item">' +
               (n.title ? '<div class="note-title">' + escNote(n.title) + '</div>' : '') +
               '<div class="note-body">' + escNote(n.content) + '</div>' +

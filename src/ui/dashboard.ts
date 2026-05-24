@@ -1,6 +1,6 @@
 import type { TenantConfig, SessionUser } from "../index";
-import { page, stationNamesJS, displayStatusJS, STATUS_COLOR_JS } from "./layout";
-import { NOTES_STYLES, notesHTML, notesJS } from "./components/notes";
+import { page, stationNamesJS, displayStatusJS, STATUS_COLOR_JS, SHARED_JS } from "./layout";
+import { NOTES_STYLES, notesHTML } from "./components/notes";
 
 export function dashboardPage(config: TenantConfig, user: SessionUser): string {
   const isLead = ["lead", "supervisor", "admin"].includes(user.role);
@@ -82,6 +82,7 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
     <div id="dash-hub" class="job-hub" style="display:none"></div>
   </main>
   `, `
+    ${SHARED_JS}
     ${stationNamesJS(config)}
     var LABELS = ${JSON.stringify(config.entity_labels)};
     var L3_STATUSES = ${JSON.stringify(config.l3_statuses)};
@@ -96,21 +97,6 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
     var selectedJobId = null;
     var jobsCache = [];
     var autoTimer = null;
-
-    function timeAgo(date) {
-      var s = Math.floor((Date.now() - date.getTime()) / 1000);
-      if (s < 60) return 'just now';
-      if (s < 3600) return Math.floor(s / 60) + 'm ago';
-      if (s < 86400) return Math.floor(s / 3600) + 'h ago';
-      return Math.floor(s / 86400) + 'd ago';
-    }
-
-    function esc(str) {
-      if (!str) return '';
-      var d = document.createElement('div');
-      d.textContent = str;
-      return d.innerHTML;
-    }
 
     function loadDashboard() {
       fetch('/api/jobs?status=active').then(function(r) { return r.json(); }).then(function(jobs) {
@@ -131,12 +117,12 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
       fetch('/api/briefs/today').then(function(r) { return r.json(); }).then(function(brief) {
         var briefHtml = '<div class="brief-card">' +
           '<div class="brief-header"><h3>Daily Brief</h3>' +
-          (brief.author_name ? '<span class="brief-meta">by ' + esc(brief.author_name) + '</span>' : '') +
+          (brief.author_name ? '<span class="brief-meta">by ' + escHtml(brief.author_name) + '</span>' : '') +
           '</div>' +
           '<div id="brief-display">' +
-          (brief.content ? '<div class="brief-content">' + esc(brief.content) + '</div>' : '<div class="brief-empty">No brief posted today</div>') +
+          (brief.content ? '<div class="brief-content">' + escHtml(brief.content) + '</div>' : '<div class="brief-empty">No brief posted today</div>') +
           '</div>' +
-          '<textarea id="brief-edit" class="brief-edit">' + esc(brief.content || '') + '</textarea>' +
+          '<textarea id="brief-edit" class="brief-edit">' + escHtml(brief.content || '') + '</textarea>' +
           (IS_LEAD ? '<div class="brief-actions">' +
             '<button class="btn-sm btn-primary" id="brief-edit-btn" onclick="toggleBriefEdit()">Edit</button>' +
             '<button class="btn-sm btn-secondary" id="brief-save-btn" style="display:none" onclick="saveBrief()">Save</button>' +
@@ -149,8 +135,8 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
           jobsHtml = '<div class="quick-jobs"><h3>Active ' + LABELS.l1 + 's</h3>' +
             jobs.map(function(j) {
               return '<a class="quick-job" href="/job/' + j.id + '">' +
-                '<div><div class="quick-job-name">' + esc(j.job_number) + '</div>' +
-                '<div class="quick-job-sub">' + esc(j.job_name) + '</div></div></a>';
+                '<div><div class="quick-job-name">' + escHtml(j.job_number) + '</div>' +
+                '<div class="quick-job-sub">' + escHtml(j.job_name) + '</div></div></a>';
             }).join('') + '</div>';
         } else {
           jobsHtml = '<div class="empty-msg">No active ' + LABELS.l1.toLowerCase() + 's.' +
@@ -197,7 +183,7 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
         '<select id="job-select" onchange="selectJob(this.value)">' +
         jobs.map(function(j) {
           return '<option value="' + j.id + '"' + (j.id === selectedJobId ? ' selected' : '') + '>' +
-            esc(j.job_number) + ' \\u2014 ' + esc(j.job_name) + '</option>';
+            escHtml(j.job_number) + ' \\u2014 ' + escHtml(j.job_name) + '</option>';
         }).join('') +
         '</select></div>';
 
@@ -249,21 +235,21 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
           bucketCard = '<div class="hub-card">' +
             '<h4>' + LABELS.l2 + 's</h4>' +
             job.buckets.map(function(b) {
-              return '<div class="bucket-row"><span>' + esc(b.name) + '</span><span class="pill pill-' + statusColor(b.status) + '">' + displayStatus(b.status) + '</span></div>';
+              return '<div class="bucket-row"><span>' + escHtml(b.name) + '</span><span class="pill pill-' + statusColor(b.status) + '">' + displayStatus(b.status) + '</span></div>';
             }).join('') + '</div>';
         }
 
         var detailsCard = '<div class="hub-card"><h4>Details</h4>';
         detailsCard += '<div class="detail-row"><span class="detail-label">' + LABELS.l3 + ' Count</span><span class="detail-value">' + total + '</span></div>';
         if (job.finish_details) {
-          detailsCard += '<div class="detail-row"><span class="detail-label">Finish</span><span class="detail-value">' + esc(job.finish_details) + '</span></div>';
+          detailsCard += '<div class="detail-row"><span class="detail-label">Finish</span><span class="detail-value">' + escHtml(job.finish_details) + '</span></div>';
         }
         detailsCard += '</div>';
 
         var engNotesCard = '';
         if (job.engineering_notes) {
           engNotesCard = '<div class="hub-card hub-card-full"><h4>Engineering Notes</h4>' +
-            '<div class="notes-preview">' + esc(job.engineering_notes) + '</div></div>';
+            '<div class="notes-preview">' + escHtml(job.engineering_notes) + '</div></div>';
         }
 
         var notesPanel = '<div class="notes-panel"><h4>Notes <button onclick="showJobNoteForm()">+ Add</button></h4>' +
@@ -277,9 +263,9 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
           jobNotes.map(function(n) {
             var ago = timeAgo(new Date(n.created_at + 'Z'));
             return '<div class="note-item">' +
-              (n.title ? '<div class="note-title">' + esc(n.title) + '</div>' : '') +
-              '<div class="note-body">' + esc(n.content) + '</div>' +
-              '<div class="note-meta"><span>' + esc(n.author_name) + ' — ' + ago + '</span>' +
+              (n.title ? '<div class="note-title">' + escHtml(n.title) + '</div>' : '') +
+              '<div class="note-body">' + escHtml(n.content) + '</div>' +
+              '<div class="note-meta"><span>' + escHtml(n.author_name) + ' — ' + ago + '</span>' +
               '<button onclick="deleteJobNote(' + n.id + ')">delete</button></div></div>';
           }).join('')) +
           '</div></div>';
@@ -289,7 +275,7 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
         try { links = JSON.parse(job.external_links || '[]'); } catch(e) {}
         if (links.length > 0) {
           linksCard = '<div class="hub-card"><h4>Links</h4><div class="link-list">' +
-            links.map(function(l) { return '<a href="' + esc(l.url) + '" target="_blank">' + esc(l.title || l.url) + '</a>'; }).join('') +
+            links.map(function(l) { return '<a href="' + escHtml(l.url) + '" target="_blank">' + escHtml(l.title || l.url) + '</a>'; }).join('') +
             '</div></div>';
         }
 
@@ -299,17 +285,17 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
           jobScans.slice(0, 8).map(function(s) {
             var t = new Date(s.scanned_at + 'Z');
             return '<div class="feed-item"><span class="feed-station">' + (STATION_NAMES[s.station] || s.station) + '</span>' +
-              (s.bucket_name ? ' — ' + esc(s.bucket_name) : '') +
+              (s.bucket_name ? ' — ' + escHtml(s.bucket_name) : '') +
               (s.cabinet_number ? ' #' + s.cabinet_number : '') +
-              '<div class="feed-meta">' + esc(s.scanned_by || '?') + ' — ' + timeAgo(t) + '</div></div>';
+              '<div class="feed-meta">' + escHtml(s.scanned_by || '?') + ' — ' + timeAgo(t) + '</div></div>';
           }).join('')) + '</div>';
 
         var briefCard = '';
         if (brief.content) {
           briefCard = '<div class="hub-card hub-card-full">' +
             '<h4>Daily Brief</h4>' +
-            '<div class="brief-content">' + esc(brief.content) + '</div>' +
-            (brief.author_name ? '<div class="brief-meta" style="margin-top:6px">by ' + esc(brief.author_name) + '</div>' : '') +
+            '<div class="brief-content">' + escHtml(brief.content) + '</div>' +
+            (brief.author_name ? '<div class="brief-meta" style="margin-top:6px">by ' + escHtml(brief.author_name) + '</div>' : '') +
             '</div>';
         }
 

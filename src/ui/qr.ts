@@ -1,5 +1,5 @@
 import type { TenantConfig, SessionUser } from "../index";
-import { page } from "./layout";
+import { page, SHARED_JS } from "./layout";
 
 export function qrPage(config: TenantConfig, user: SessionUser): string {
   return page("QR Codes", `
@@ -80,6 +80,7 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
     </div>
   </main>
   `, `
+    ${SHARED_JS}
     var STATIONS = ${JSON.stringify(config.stations)};
     var LABELS = ${JSON.stringify(config.entity_labels)};
     var activeTab = 'stations';
@@ -220,8 +221,6 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
         });
       });
     }
-
-    function escHtml(s) { return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
 
     // --- System tab ---
     var systemRendered = false;

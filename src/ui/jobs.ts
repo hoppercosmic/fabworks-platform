@@ -1,5 +1,5 @@
 import type { TenantConfig, SessionUser } from "../index";
-import { page, stationNamesJS, displayStatusJS, STATUS_COLOR_JS, ROLE_LEVELS } from "./layout";
+import { page, stationNamesJS, displayStatusJS, STATUS_COLOR_JS, ROLE_LEVELS, SHARED_JS } from "./layout";
 
 export function newJobPage(config: TenantConfig, user: SessionUser): string {
   const L1 = config.entity_labels.l1;
@@ -225,6 +225,7 @@ export function jobDetailPage(config: TenantConfig, user: SessionUser): string {
     </div>
   </main>
 `, `
+    ${SHARED_JS}
     ${stationNamesJS(config)}
     var LABELS = ${JSON.stringify(config.entity_labels)};
     var STATIONS = ${JSON.stringify(config.stations)};
@@ -343,8 +344,6 @@ export function jobDetailPage(config: TenantConfig, user: SessionUser): string {
     });
 
     // --- Cabinet metadata modal ---
-    function escHtml(s) { return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
-
     function openCabModal(cabId) {
       var cab = job.cabinets.find(function(c) { return c.id === cabId; });
       if (!cab) return;

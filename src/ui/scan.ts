@@ -1,5 +1,5 @@
 import type { TenantConfig, SessionUser } from "../index";
-import { page, stationNamesJS, displayStatusJS, STATUS_COLOR_JS, ROLE_LEVELS } from "./layout";
+import { page, stationNamesJS, displayStatusJS, STATUS_COLOR_JS, ROLE_LEVELS, SHARED_JS } from "./layout";
 
 export function scanPage(config: TenantConfig, user: SessionUser): string {
   const L2 = config.entity_labels.l2;
@@ -73,11 +73,11 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
     <div class="swipe-toast" id="swipe-toast"></div>
   </main>
 `, `
+    ${SHARED_JS}
     var STATIONS = ${JSON.stringify(config.stations)};
     var LABELS = ${JSON.stringify(config.entity_labels)};
     ${displayStatusJS(config)}
     ${STATUS_COLOR_JS}
-    function escHtml(s) { return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
 
     var selectedStation = localStorage.getItem('fw_station') || null;
     var selectedEntityId = null;

@@ -1,5 +1,5 @@
 import type { TenantConfig, SessionUser } from "../index";
-import { page, stationNamesJS, displayStatusJS, STATUS_COLOR_JS, ROLE_LEVELS } from "./layout";
+import { page, stationNamesJS, displayStatusJS, STATUS_COLOR_JS, ROLE_LEVELS, SHARED_JS } from "./layout";
 
 export function workbenchPage(config: TenantConfig, user: SessionUser): string {
   return page("Build", `
@@ -91,13 +91,7 @@ export function workbenchPage(config: TenantConfig, user: SessionUser): string {
       </div>
     </div>
   `, `
-    function escHtml(s) { return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
-    function fmtTime(totalSec) {
-      var h = Math.floor(totalSec / 3600);
-      var m = Math.floor((totalSec % 3600) / 60);
-      var s = Math.floor(totalSec % 60);
-      return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
-    }
+    ${SHARED_JS}
 
     var sessionId = null;
     var currentCabinetId = null;
@@ -368,29 +362,7 @@ export function myWorkbenchPage(config: TenantConfig, user: SessionUser): string
     </div>
   </main>
   `, `
-    function escHtml(s) { return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
-    function fmtTime(totalSec) {
-      if (totalSec < 0) totalSec = 0;
-      var h = Math.floor(totalSec / 3600);
-      var m = Math.floor((totalSec % 3600) / 60);
-      var s = Math.floor(totalSec % 60);
-      return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s;
-    }
-    function fmtMin(m) {
-      if (m == null) return '—';
-      if (m < 60) return m + 'm';
-      var h = Math.floor(m / 60);
-      var rm = Math.round(m % 60);
-      return h + 'h ' + rm + 'm';
-    }
-    function timeAgo(dateStr) {
-      var ms = Date.now() - new Date(dateStr + 'Z').getTime();
-      var min = Math.floor(ms / 60000);
-      if (min < 60) return min + 'm ago';
-      var hr = Math.floor(min / 60);
-      if (hr < 24) return hr + 'h ago';
-      return Math.floor(hr / 24) + 'd ago';
-    }
+    ${SHARED_JS}
 
     var abTimerEl = document.getElementById('ab-timer');
     var abInterval = null;
@@ -452,7 +424,7 @@ export function myWorkbenchPage(config: TenantConfig, user: SessionUser): string
           document.getElementById('recent-list').innerHTML = data.recent.map(function(r) {
             return '<div class="recent-row">'
               + '<div><span class="rr-cab">${L3} #' + r.cabinet_number + '</span> · ' + r.job_number + '</div>'
-              + '<div><span class="rr-time">' + fmtMin(r.working_minutes) + '</span> <span class="rr-ago">' + timeAgo(r.completed_at) + '</span></div>'
+              + '<div><span class="rr-time">' + fmtMin(r.working_minutes) + '</span> <span class="rr-ago">' + timeAgo(new Date(r.completed_at + 'Z')) + '</span></div>'
               + '</div>';
           }).join('');
         }

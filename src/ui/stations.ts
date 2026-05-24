@@ -1,5 +1,5 @@
 import type { TenantConfig, SessionUser } from "../index";
-import { page, stationNamesJS, displayStatusJS, STATUS_COLOR_JS, ROLE_LEVELS } from "./layout";
+import { page, stationNamesJS, displayStatusJS, STATUS_COLOR_JS, ROLE_LEVELS, SHARED_JS } from "./layout";
 
 export function stationViewPage(config: TenantConfig, user: SessionUser): string {
   return page("Station View", `
@@ -112,6 +112,7 @@ export function stationViewPage(config: TenantConfig, user: SessionUser): string
     <div class="swipe-toast" id="swipe-toast"></div>
   </main>
 `, `
+    ${SHARED_JS}
     var STATIONS = ${JSON.stringify(config.stations)};
     var LABELS = ${JSON.stringify(config.entity_labels)};
     var TERMINAL_STATUS = ${JSON.stringify(config.l3_terminal_status)};
@@ -186,14 +187,6 @@ export function stationViewPage(config: TenantConfig, user: SessionUser): string
 
     svPrev.addEventListener('click', function() { var i = svIdx(); if (i > 0) selectStation(STATIONS[i - 1].slug); });
     svNext.addEventListener('click', function() { var i = svIdx(); if (i < STATIONS.length - 1) selectStation(STATIONS[i + 1].slug); });
-
-    function timeAgo(date) {
-      var s = Math.floor((Date.now() - date.getTime()) / 1000);
-      if (s < 60) return 'just now';
-      if (s < 3600) return Math.floor(s / 60) + 'm ago';
-      if (s < 86400) return Math.floor(s / 3600) + 'h ago';
-      return Math.floor(s / 86400) + 'd ago';
-    }
 
     function levelLabel(level) {
       if (level === 'l1') return LABELS.l1.toLowerCase() + 's';

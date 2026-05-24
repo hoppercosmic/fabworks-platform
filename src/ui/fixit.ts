@@ -1,5 +1,5 @@
-import type { TenantConfig, SessionUser } from "../index";
-import { page } from "./layout";
+import type { TenantConfig, SessionUser, UserRole } from "../index";
+import { page, SHARED_JS } from "./layout";
 
 export function fixitPage(config: TenantConfig, user: SessionUser): string {
   const isLead = (["lead", "supervisor", "admin"] as UserRole[]).includes(user.role);
@@ -50,6 +50,7 @@ export function fixitPage(config: TenantConfig, user: SessionUser): string {
   </main>
   <div class="photo-modal" id="photo-modal"><img id="photo-modal-img" src=""></div>
   `, `
+    ${SHARED_JS}
     var IS_LEAD = ${isLead};
     var ROOT_CAUSE_LABELS = {};
     var listDiv = document.getElementById('fixit-list');
@@ -58,8 +59,6 @@ export function fixitPage(config: TenantConfig, user: SessionUser): string {
     var statusSelect = document.getElementById('status-select');
     var photoModal = document.getElementById('photo-modal');
     var photoModalImg = document.getElementById('photo-modal-img');
-
-    function escHtml(s) { return s ? s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;') : ''; }
 
     function fmtDate(d) {
       if (!d) return '';

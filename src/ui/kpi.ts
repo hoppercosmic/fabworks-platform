@@ -1,5 +1,5 @@
 import type { TenantConfig, SessionUser } from "../index";
-import { page } from "./layout";
+import { page, SHARED_JS } from "./layout";
 
 export function kpiPage(config: TenantConfig, user: SessionUser): string {
   return page("Assembler KPI", `
@@ -100,20 +100,13 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
     <div id="empty" class="empty-state" style="display:none">No assembly data in this time range</div>
   </main>
   `, `
+    ${SHARED_JS}
     var LABELS = ${JSON.stringify(config.entity_labels)};
     var daysSelect = document.getElementById('days-select');
     var gridDiv = document.getElementById('kpi-grid');
     var summaryDiv = document.getElementById('summary');
     var emptyDiv = document.getElementById('empty');
     var stationInfo = document.getElementById('station-info');
-
-    function fmtMin(m) {
-      if (m == null) return '—';
-      if (m < 60) return m + 'm';
-      var h = Math.floor(m / 60);
-      var rm = Math.round(m % 60);
-      return h + 'h ' + rm + 'm';
-    }
 
     function load() {
       var days = daysSelect.value;
@@ -341,20 +334,13 @@ export function taktPage(config: TenantConfig, user: SessionUser): string {
     <div id="empty" class="empty-state" style="display:none">No transition data in this time range</div>
   </main>
   `, `
+    ${SHARED_JS}
     var LABELS = ${JSON.stringify(config.entity_labels)};
     var daysSelect = document.getElementById('days-select');
     var chartDiv = document.getElementById('takt-chart');
     var outlierCard = document.getElementById('outlier-card');
     var outlierList = document.getElementById('outlier-list');
     var emptyDiv = document.getElementById('empty');
-
-    function fmtMin(m) {
-      if (m == null || m === 0) return '—';
-      if (m < 60) return Math.round(m) + 'm';
-      var h = Math.floor(m / 60);
-      var rm = Math.round(m % 60);
-      return h + 'h ' + rm + 'm';
-    }
 
     function load() {
       var days = daysSelect.value;

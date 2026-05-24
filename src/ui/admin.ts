@@ -1,5 +1,5 @@
 import type { TenantConfig, SessionUser } from "../index";
-import { page } from "./layout";
+import { page, SHARED_JS } from "./layout";
 
 export function adminPage(config: TenantConfig, user: SessionUser): string {
   const ROLES: string[] = ["user", "lead", "supervisor", "admin"];
@@ -192,6 +192,7 @@ export function adminPage(config: TenantConfig, user: SessionUser): string {
     </div>
   </main>
   `, `
+    ${SHARED_JS}
     var editUserId = null;
 
     // --- Tabs ---
@@ -210,10 +211,10 @@ export function adminPage(config: TenantConfig, user: SessionUser): string {
         var list = document.getElementById('user-list');
         list.innerHTML = users.map(function(u) {
           var cls = u.active ? '' : ' inactive';
-          return '<div class="user-row' + cls + '" data-uid="' + u.id + '" data-name="' + esc(u.name) + '" data-email="' + esc(u.email) + '" data-role="' + u.role + '" data-home="' + (u.home_page || 'scan') + '" data-active="' + u.active + '">' +
+          return '<div class="user-row' + cls + '" data-uid="' + u.id + '" data-name="' + escHtml(u.name) + '" data-email="' + escHtml(u.email) + '" data-role="' + u.role + '" data-home="' + (u.home_page || 'scan') + '" data-active="' + u.active + '">' +
             '<div>' +
-              '<div class="name">' + esc(u.name) + (!u.active ? ' <span style="color:var(--error);font-size:0.7rem">(disabled)</span>' : '') + '</div>' +
-              '<div class="email">' + esc(u.email) + '</div>' +
+              '<div class="name">' + escHtml(u.name) + (!u.active ? ' <span style="color:var(--error);font-size:0.7rem">(disabled)</span>' : '') + '</div>' +
+              '<div class="email">' + escHtml(u.email) + '</div>' +
             '</div>' +
             '<div class="meta">' +
               '<span class="pill pill-blue">' + u.role + '</span>' +
@@ -238,8 +239,6 @@ export function adminPage(config: TenantConfig, user: SessionUser): string {
         });
       });
     }
-
-    function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
     document.getElementById('edit-cancel').addEventListener('click', function() {
       document.getElementById('edit-overlay').classList.remove('open');
