@@ -19,14 +19,15 @@ export const NOTES_STYLES = `
 `;
 
 export function notesHTML(containerId: string): string {
+  const fnId = containerId.replace(/-/g, "_");
   return `<div class="notes-panel" id="${containerId}">
-    <h4>Notes <button onclick="showNoteForm_${containerId}()">+ Add</button></h4>
+    <h4>Notes <button onclick="showNoteForm_${fnId}()">+ Add</button></h4>
     <div class="note-form" id="${containerId}-form">
       <input type="text" id="${containerId}-title" placeholder="Title (optional)">
       <textarea id="${containerId}-content" placeholder="Write a note..."></textarea>
       <div class="note-form-actions">
-        <button class="btn-save" onclick="saveNote_${containerId}()">Save</button>
-        <button class="btn-cancel" onclick="hideNoteForm_${containerId}()">Cancel</button>
+        <button class="btn-save" onclick="saveNote_${fnId}()">Save</button>
+        <button class="btn-cancel" onclick="hideNoteForm_${fnId}()">Cancel</button>
       </div>
     </div>
     <div id="${containerId}-list"><div class="notes-empty">Loading...</div></div>
@@ -34,6 +35,7 @@ export function notesHTML(containerId: string): string {
 }
 
 export function notesJS(containerId: string, contextType: string, contextId: string): string {
+  const fnId = containerId.replace(/-/g, "_");
   return `
     function escNote(str) {
       if (!str) return '';
@@ -41,14 +43,14 @@ export function notesJS(containerId: string, contextType: string, contextId: str
       d.textContent = str;
       return d.innerHTML;
     }
-    function notesTimeAgo_${containerId}(date) {
+    function notesTimeAgo_${fnId}(date) {
       var s = Math.floor((Date.now() - date.getTime()) / 1000);
       if (s < 60) return 'just now';
       if (s < 3600) return Math.floor(s / 60) + 'm ago';
       if (s < 86400) return Math.floor(s / 3600) + 'h ago';
       return Math.floor(s / 86400) + 'd ago';
     }
-    function loadNotes_${containerId}() {
+    function loadNotes_${fnId}() {
       var list = document.getElementById('${containerId}-list');
       fetch('/api/notes?context_type=${contextType}&context_id=${contextId}')
         .then(function(r) { return r.json(); })
@@ -58,25 +60,25 @@ export function notesJS(containerId: string, contextType: string, contextId: str
             return;
           }
           list.innerHTML = notes.map(function(n) {
-            var ago = notesTimeAgo_${containerId}(new Date(n.created_at + 'Z'));
+            var ago = notesTimeAgo_${fnId}(new Date(n.created_at + 'Z'));
             return '<div class="note-item">' +
               (n.title ? '<div class="note-title">' + escNote(n.title) + '</div>' : '') +
               '<div class="note-body">' + escNote(n.content) + '</div>' +
               '<div class="note-meta"><span>' + escNote(n.author_name) + ' — ' + ago + '</span>' +
-              '<button onclick="deleteNote_${containerId}(' + n.id + ')">delete</button></div></div>';
+              '<button onclick="deleteNote_${fnId}(' + n.id + ')">delete</button></div></div>';
           }).join('');
         });
     }
-    function showNoteForm_${containerId}() {
+    function showNoteForm_${fnId}() {
       document.getElementById('${containerId}-form').style.display = 'block';
       document.getElementById('${containerId}-content').focus();
     }
-    function hideNoteForm_${containerId}() {
+    function hideNoteForm_${fnId}() {
       document.getElementById('${containerId}-form').style.display = 'none';
       document.getElementById('${containerId}-title').value = '';
       document.getElementById('${containerId}-content').value = '';
     }
-    function saveNote_${containerId}() {
+    function saveNote_${fnId}() {
       var title = document.getElementById('${containerId}-title').value.trim();
       var content = document.getElementById('${containerId}-content').value.trim();
       if (!content) return;
@@ -85,14 +87,14 @@ export function notesJS(containerId: string, contextType: string, contextId: str
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ context_type: '${contextType}', context_id: '${contextId}', title: title || undefined, content: content })
       }).then(function() {
-        hideNoteForm_${containerId}();
-        loadNotes_${containerId}();
+        hideNoteForm_${fnId}();
+        loadNotes_${fnId}();
       });
     }
-    function deleteNote_${containerId}(id) {
+    function deleteNote_${fnId}(id) {
       if (!confirm('Delete this note?')) return;
-      fetch('/api/notes/' + id, { method: 'DELETE' }).then(function() { loadNotes_${containerId}(); });
+      fetch('/api/notes/' + id, { method: 'DELETE' }).then(function() { loadNotes_${fnId}(); });
     }
-    loadNotes_${containerId}();
+    loadNotes_${fnId}();
   `;
 }

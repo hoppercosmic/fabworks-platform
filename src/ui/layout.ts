@@ -56,18 +56,22 @@ function renderNav(currentPath: string, user: SessionUser, config: TenantConfig 
   PRIMARY_NAV.filter(i => userLevel >= ROLE_LEVELS[i.minRole]).forEach(i => items.push(renderNavItem(i, currentPath)));
 
   if (config && config.station_menus && config.station_menus.length > 0) {
-    items.push('<span class="nav-sep"></span>');
-    config.station_menus
-      .filter((m: StationMenu) => userLevel >= ROLE_LEVELS[m.minRole])
-      .forEach((m: StationMenu) => {
-        const path = `/menu/${m.slug}`;
-        const active = currentPath === path;
-        items.push(`<a href="${path}" class="nav-item${active ? " active" : ""}"><span class="nav-icon">${getMenuIcon(m.icon)}</span><span class="nav-label">${m.name}</span></a>`);
-      });
+    const visibleMenus = config.station_menus.filter((m: StationMenu) => userLevel >= ROLE_LEVELS[m.minRole]);
+    if (visibleMenus.length > 0) {
+      const isStationActive = visibleMenus.some((m: StationMenu) => currentPath === `/menu/${m.slug}`) || currentPath === "/stations";
+      const menuLinks = visibleMenus.map((m: StationMenu) => {
+        const active = currentPath === `/menu/${m.slug}`;
+        return `<a href="/menu/${m.slug}" class="sd-item${active ? " active" : ""}">${m.name}</a>`;
+      }).join("");
+      items.push(`<div class="stations-menu"><button class="nav-item stations-trigger${isStationActive ? " active" : ""}" id="stations-trigger"><span class="nav-icon">${SVG_SCAN}</span><span class="nav-label">Stations ▾</span></button><div class="stations-dropdown" id="stations-dropdown">${menuLinks}<div class="sd-divider"></div><a href="/stations" class="sd-item${currentPath === "/stations" ? " active" : ""}">Station View</a></div></div>`);
+    }
   }
 
-  items.push('<span class="nav-sep"></span>');
-  UTIL_NAV.filter(i => userLevel >= ROLE_LEVELS[i.minRole]).forEach(i => items.push(renderNavItem(i, currentPath)));
+  const utilItems = UTIL_NAV.filter(i => userLevel >= ROLE_LEVELS[i.minRole]);
+  if (utilItems.length > 0) {
+    items.push('<span class="nav-sep"></span>');
+    utilItems.forEach(i => items.push(renderNavItem(i, currentPath)));
+  }
 
   return items.join("");
 }
@@ -146,6 +150,18 @@ export const SHARED_STYLES = `
     .user-dropdown .ud-role { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
     .user-dropdown a { display: block; padding: 12px 14px; color: var(--text); text-decoration: none; font-size: 0.85rem; }
     .user-dropdown a:hover { background: var(--bg); }
+    .stations-menu { position: relative; flex-shrink: 0; }
+    .stations-trigger { background: none; border: none; font-family: inherit; }
+    .stations-dropdown {
+      display: none; position: absolute; left: 0; top: 100%; margin-top: 4px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      min-width: 180px; z-index: 150; overflow: hidden;
+    }
+    .stations-dropdown.open { display: block; }
+    .sd-item { display: block; padding: 12px 14px; color: var(--text); text-decoration: none; font-size: 0.85rem; }
+    .sd-item:hover { background: var(--bg); }
+    .sd-item.active { color: var(--accent); font-weight: 600; }
+    .sd-divider { height: 1px; background: var(--border); margin: 0; }
     .card {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -257,9 +273,25 @@ const USER_MENU_JS = `
 
     var _avatarBtn = document.getElementById('user-avatar-btn');
     var _userDrop = document.getElementById('user-dropdown');
+    var _stationsBtn = document.getElementById('stations-trigger');
+    var _stationsDrop = document.getElementById('stations-dropdown');
+    if (_stationsBtn) {
+      _stationsBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        _stationsDrop.classList.toggle('open');
+        _userDrop.classList.remove('open');
+      });
+    }
     if (_avatarBtn) {
-      _avatarBtn.addEventListener('click', function(e) { e.stopPropagation(); _userDrop.classList.toggle('open'); });
-      document.addEventListener('click', function() { _userDrop.classList.remove('open'); });
+      _avatarBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        _userDrop.classList.toggle('open');
+        if (_stationsDrop) _stationsDrop.classList.remove('open');
+      });
+      document.addEventListener('click', function() {
+        _userDrop.classList.remove('open');
+        if (_stationsDrop) _stationsDrop.classList.remove('open');
+      });
       document.getElementById('logout-link').addEventListener('click', function(e) {
         e.preventDefault();
         fetch('/api/auth/logout', { method: 'POST' }).then(function() { window.location.href = '/login'; });
