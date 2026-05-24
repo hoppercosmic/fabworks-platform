@@ -55,18 +55,6 @@ function renderNav(currentPath: string, user: SessionUser, config: TenantConfig 
 
   PRIMARY_NAV.filter(i => userLevel >= ROLE_LEVELS[i.minRole]).forEach(i => items.push(renderNavItem(i, currentPath)));
 
-  if (config && config.station_menus && config.station_menus.length > 0) {
-    const visibleMenus = config.station_menus.filter((m: StationMenu) => userLevel >= ROLE_LEVELS[m.minRole]);
-    if (visibleMenus.length > 0) {
-      const isStationActive = visibleMenus.some((m: StationMenu) => currentPath === `/menu/${m.slug}`) || currentPath === "/stations";
-      const menuLinks = visibleMenus.map((m: StationMenu) => {
-        const active = currentPath === `/menu/${m.slug}`;
-        return `<a href="/menu/${m.slug}" class="sd-item${active ? " active" : ""}">${m.name}</a>`;
-      }).join("");
-      items.push(`<div class="stations-menu"><button class="nav-item stations-trigger${isStationActive ? " active" : ""}" id="stations-trigger"><span class="nav-icon">${SVG_SCAN}</span><span class="nav-label">Stations ▾</span></button><div class="stations-dropdown" id="stations-dropdown">${menuLinks}<div class="sd-divider"></div><a href="/stations" class="sd-item${currentPath === "/stations" ? " active" : ""}">Station View</a></div></div>`);
-    }
-  }
-
   const utilItems = UTIL_NAV.filter(i => userLevel >= ROLE_LEVELS[i.minRole]);
   if (utilItems.length > 0) {
     items.push('<span class="nav-sep"></span>');
@@ -74,6 +62,30 @@ function renderNav(currentPath: string, user: SessionUser, config: TenantConfig 
   }
 
   return items.join("");
+}
+
+function renderStationsDropdown(currentPath: string, user: SessionUser, config: TenantConfig | null): string {
+  if (!config || !config.station_menus || config.station_menus.length === 0) return "";
+  const userLevel = ROLE_LEVELS[user.role];
+  const visibleMenus = config.station_menus.filter((m: StationMenu) => userLevel >= ROLE_LEVELS[m.minRole]);
+  if (visibleMenus.length === 0) return "";
+
+  const isStationActive = visibleMenus.some((m: StationMenu) => currentPath === `/menu/${m.slug}`) || currentPath === "/stations";
+  const menuLinks = visibleMenus.map((m: StationMenu) => {
+    const active = currentPath === `/menu/${m.slug}`;
+    return `<a href="/menu/${m.slug}" class="sd-item${active ? " active" : ""}">${m.name}</a>`;
+  }).join("");
+
+  return `<div class="stations-menu">
+    <button class="nav-item stations-trigger${isStationActive ? " active" : ""}" id="stations-trigger">
+      <span class="nav-icon">${SVG_SCAN}</span><span class="nav-label">Stations ▾</span>
+    </button>
+    <div class="stations-dropdown" id="stations-dropdown">
+      ${menuLinks}
+      <div class="sd-divider"></div>
+      <a href="/stations" class="sd-item${currentPath === "/stations" ? " active" : ""}">Station View</a>
+    </div>
+  </div>`;
 }
 
 // ─── Shared Styles ───────────────────────────────────────
@@ -478,6 +490,7 @@ export function page(title: string, extraStyles: string, body: string, script: s
   <div class="top-bar">
     <div class="top-bar-title">FabWorks</div>
     <nav class="top-nav">${renderNav(currentPath, user, config)}</nav>
+    ${renderStationsDropdown(currentPath, user, config)}
     <div class="user-menu">
       <button class="user-avatar" id="user-avatar-btn">${user.name.charAt(0).toUpperCase()}</button>
       <div class="user-dropdown" id="user-dropdown">
