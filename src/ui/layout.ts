@@ -37,7 +37,7 @@ const TOOLS_NAV: NavItem[] = [
   { path: "/takt",       label: "Takt",      minRole: "lead" },
   { path: "/fixit",      label: "FixIt",     minRole: "lead" },
   { path: "/jobs/new",   label: "New Job",   minRole: "admin" },
-  { path: "/qr",         label: "QR Codes",  minRole: "admin" },
+  { path: "/qr",         label: "QR Codes",  minRole: "lead" },
 ];
 
 function renderTopBar(currentPath: string, user: SessionUser, config: TenantConfig | null): string {

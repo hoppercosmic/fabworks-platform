@@ -1,7 +1,8 @@
-import type { TenantConfig, SessionUser } from "../index";
+import type { TenantConfig, SessionUser, UserRole } from "../index";
 import { page, SHARED_JS } from "./layout";
 
 export function qrPage(config: TenantConfig, user: SessionUser): string {
+  const isAdmin = (["admin"] as UserRole[]).includes(user.role);
   return page("QR Codes", `
     main { flex: 1; padding: 10px 16px 16px; max-width: 600px; width: 100%; margin: 0 auto; display: flex; flex-direction: column; gap: 12px; }
     .qr-tabs { display: flex; gap: 0; border-radius: 8px; overflow: hidden; border: 1px solid var(--border); }
@@ -46,29 +47,29 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
     }
   `, `
   <main>
-    <div class="card">
+    ${isAdmin ? `<div class="card">
       <div class="qr-tabs" id="qr-tabs">
-        <button class="active" data-tab="stations">Stations</button>
-        <button data-tab="job">Job Labels</button>
+        <button data-tab="stations">Stations</button>
+        <button class="active" data-tab="job">Job Labels</button>
         <button data-tab="system">System</button>
       </div>
     </div>
-    <div id="tab-stations">
+    <div id="tab-stations" style="display:none">
       <div class="qr-grid" id="station-grid"></div>
-    </div>
-    <div id="tab-job" style="display:none">
+    </div>` : ''}
+    <div id="tab-job">
       <div class="card job-select-row">
         <label>Select Job</label>
         <select class="job-select" id="job-select"><option value="">— Choose a job —</option></select>
       </div>
       <div id="job-qr-content"></div>
     </div>
-    <div id="tab-system" style="display:none">
+    ${isAdmin ? `<div id="tab-system" style="display:none">
       <div class="qr-section">System Commands</div>
       <div class="qr-grid" id="system-grid"></div>
       <div class="qr-section" style="margin-top:12px">All Stations</div>
       <div class="qr-grid" id="system-stations-grid"></div>
-    </div>
+    </div>` : ''}
     <div class="qr-actions">
       <button class="btn btn-primary" id="print-btn" style="font-size:1rem;padding:12px">Print</button>
     </div>
@@ -81,26 +82,29 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
   </main>
   `, `
     ${SHARED_JS}
+    var IS_ADMIN = ${isAdmin};
     var STATIONS = ${JSON.stringify(config.stations)};
     var LABELS = ${JSON.stringify(config.entity_labels)};
-    var activeTab = 'stations';
+    var activeTab = 'job';
 
-    // --- Tabs ---
+    // --- Tabs (admin only) ---
     var tabs = document.getElementById('qr-tabs');
     var tabStations = document.getElementById('tab-stations');
     var tabJob = document.getElementById('tab-job');
     var tabSystem = document.getElementById('tab-system');
-    tabs.addEventListener('click', function(e) {
-      var btn = e.target.closest('button');
-      if (!btn) return;
-      activeTab = btn.dataset.tab;
-      tabs.querySelectorAll('button').forEach(function(b) { b.classList.remove('active'); });
-      btn.classList.add('active');
-      tabStations.style.display = activeTab === 'stations' ? '' : 'none';
-      tabJob.style.display = activeTab === 'job' ? '' : 'none';
-      tabSystem.style.display = activeTab === 'system' ? '' : 'none';
-      if (activeTab === 'system' && !systemRendered) renderSystem();
-    });
+    if (tabs) {
+      tabs.addEventListener('click', function(e) {
+        var btn = e.target.closest('button');
+        if (!btn) return;
+        activeTab = btn.dataset.tab;
+        tabs.querySelectorAll('button').forEach(function(b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        if (tabStations) tabStations.style.display = activeTab === 'stations' ? '' : 'none';
+        tabJob.style.display = activeTab === 'job' ? '' : 'none';
+        if (tabSystem) tabSystem.style.display = activeTab === 'system' ? '' : 'none';
+        if (activeTab === 'system' && !systemRendered) renderSystem();
+      });
+    }
 
     // --- Spotlight (full-screen QR for device-to-device scanning) ---
     var spotlight = document.getElementById('spotlight');
@@ -131,6 +135,7 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
 
     function renderStations() {
       var grid = document.getElementById('station-grid');
+      if (!grid) return;
       grid.innerHTML = '';
       STATIONS.forEach(function(s) {
         var card = document.createElement('div');
@@ -149,7 +154,7 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
         grid.appendChild(card);
       });
     }
-    renderStations();
+    if (IS_ADMIN) renderStations();
 
     // --- Job selector ---
     var jobSelect = document.getElementById('job-select');
