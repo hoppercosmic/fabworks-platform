@@ -1,0 +1,11 @@
+export { loginPage } from "./login";
+export { scanPage } from "./scan";
+export { newJobPage, jobDetailPage, progressPage } from "./jobs";
+export { qrPage } from "./qr";
+export { dashboardPage } from "./dashboard";
+export { stationViewPage } from "./stations";
+export { kpiPage, taktPage } from "./kpi";
+export { adminPage } from "./admin";
+export { workbenchPage, myWorkbenchPage } from "./workbench";
+export { fixitPage } from "./fixit";
+export { stationMenuPage } from "./station-menu";

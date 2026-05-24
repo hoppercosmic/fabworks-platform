@@ -1,0 +1,1 @@
+ALTER TABLE config ADD COLUMN station_menus TEXT NOT NULL DEFAULT '[]';

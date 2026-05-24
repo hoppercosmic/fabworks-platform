@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage, workbenchPage, fixitPage, myWorkbenchPage, qrPage } from "./ui";
+import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage, workbenchPage, fixitPage, myWorkbenchPage, qrPage, stationMenuPage } from "./ui/index";
 
 // --- Types ---
 
@@ -13,12 +13,22 @@ type StationDef = {
   sets_status?: string;
 };
 
+type StationMenu = {
+  slug: string;
+  name: string;
+  icon: string;
+  station_slugs: string[];
+  features: string[];
+  minRole: UserRole;
+};
+
 type TenantConfig = {
   shop_type: string;
   entity_labels: { l1: string; l2: string; l3: string };
   stations: StationDef[];
   l3_statuses: string[];
   l3_terminal_status: string;
+  station_menus: StationMenu[];
 };
 
 type UserRole = "user" | "lead" | "supervisor" | "admin";
@@ -33,7 +43,7 @@ type SessionUser = {
   home_page: HomePage;
 };
 
-export type { TenantConfig, StationDef, UserRole, SessionUser };
+export type { TenantConfig, StationDef, StationMenu, UserRole, SessionUser };
 
 // --- Shop Templates ---
 
@@ -41,19 +51,23 @@ const SHOP_TEMPLATES: Record<string, Omit<TenantConfig, "shop_type">> = {
   cabinet: {
     entity_labels: { l1: "Job", l2: "Bucket", l3: "Cabinet" },
     stations: [
-      { slug: "receiving", name: "Receiving", level: "l1", seq: 1 },
-      { slug: "kitting", name: "Kitting", level: "l1", seq: 2 },
-      { slug: "cnc", name: "CNC", level: "l2", seq: 3 },
-      { slug: "edge_banding", name: "Edge Banding", level: "l2", seq: 4 },
-      { slug: "custom", name: "Custom", level: "l2", seq: 5 },
-      { slug: "finishing", name: "Finishing", level: "l2", seq: 6 },
-      { slug: "to_assembly", name: "To Assembly", level: "l2", seq: 7 },
-      { slug: "assembly_start", name: "Assembly Start", level: "l3", seq: 8, sets_status: "assembling" },
-      { slug: "assembly_complete", name: "Assembly Complete", level: "l3", seq: 9, sets_status: "assembled" },
-      { slug: "staging", name: "Staging", level: "l3", seq: 10, sets_status: "staged" },
+      { slug: "shop_floor", name: "Shop Floor", level: "l1", seq: 1 },
+      { slug: "cnc_eb", name: "CNC/EB", level: "l2", seq: 2 },
+      { slug: "custom", name: "Custom", level: "l2", seq: 3 },
+      { slug: "finishing", name: "Finishing", level: "l2", seq: 4 },
+      { slug: "assembly", name: "Assembly", level: "l3", seq: 5, sets_status: "assembling" },
+      { slug: "staging", name: "Staging", level: "l3", seq: 6, sets_status: "staged" },
     ],
-    l3_statuses: ["pending", "assembling", "assembled", "staged"],
+    l3_statuses: ["pending", "assembling", "staged"],
     l3_terminal_status: "staged",
+    station_menus: [
+      { slug: "cnc_eb", name: "CNC/EB", icon: "cpu", station_slugs: ["cnc_eb"], features: ["notes"], minRole: "user" },
+      { slug: "assembly", name: "Assembly", icon: "wrench", station_slugs: ["assembly"], features: ["notes"], minRole: "user" },
+      { slug: "finishing", name: "Finishing", icon: "paint", station_slugs: ["finishing"], features: ["notes"], minRole: "user" },
+      { slug: "custom", name: "Custom", icon: "tool", station_slugs: ["custom"], features: ["notes"], minRole: "user" },
+      { slug: "waterspider", name: "WS", icon: "flow", station_slugs: ["staging"], features: ["notes"], minRole: "user" },
+      { slug: "warehouse", name: "Warehouse", icon: "box", station_slugs: ["shop_floor"], features: ["notes"], minRole: "user" },
+    ],
   },
   metal: {
     entity_labels: { l1: "Project", l2: "Batch", l3: "Part" },
@@ -68,6 +82,11 @@ const SHOP_TEMPLATES: Record<string, Omit<TenantConfig, "shop_type">> = {
     ],
     l3_statuses: ["pending", "coating", "inspected", "shipped"],
     l3_terminal_status: "shipped",
+    station_menus: [
+      { slug: "fab", name: "Fab", icon: "wrench", station_slugs: ["cutting", "welding", "grinding"], features: ["kpi", "takt", "notes"], minRole: "user" },
+      { slug: "finish", name: "Finish", icon: "paint", station_slugs: ["coating", "inspection"], features: ["kpi", "notes"], minRole: "user" },
+      { slug: "shipping", name: "Ship", icon: "box", station_slugs: ["shipping"], features: ["notes"], minRole: "user" },
+    ],
   },
   wood: {
     entity_labels: { l1: "Order", l2: "Group", l3: "Piece" },
@@ -83,6 +102,11 @@ const SHOP_TEMPLATES: Record<string, Omit<TenantConfig, "shop_type">> = {
     ],
     l3_statuses: ["pending", "assembling", "inspected", "packed"],
     l3_terminal_status: "packed",
+    station_menus: [
+      { slug: "mill", name: "Mill", icon: "cpu", station_slugs: ["milling", "sanding"], features: ["kpi", "takt", "notes"], minRole: "user" },
+      { slug: "finish", name: "Finish", icon: "paint", station_slugs: ["staining", "drying"], features: ["kpi", "notes"], minRole: "user" },
+      { slug: "assembly", name: "Assembly", icon: "wrench", station_slugs: ["assembly", "qc", "packing"], features: ["kpi", "takt", "notes"], minRole: "user" },
+    ],
   },
 };
 
@@ -99,13 +123,14 @@ async function loadConfig(db: D1Database): Promise<TenantConfig> {
   if (!row) {
     const tpl = SHOP_TEMPLATES.cabinet;
     await db.prepare(
-      "INSERT INTO config (id, shop_type, entity_labels, stations, l3_statuses, l3_terminal_status) VALUES (1,?,?,?,?,?)"
+      "INSERT INTO config (id, shop_type, entity_labels, stations, l3_statuses, l3_terminal_status, station_menus) VALUES (1,?,?,?,?,?,?)"
     ).bind(
       "cabinet",
       JSON.stringify(tpl.entity_labels),
       JSON.stringify(tpl.stations),
       JSON.stringify(tpl.l3_statuses),
       tpl.l3_terminal_status,
+      JSON.stringify(tpl.station_menus),
     ).run();
     cachedConfig = { shop_type: "cabinet", ...tpl };
   } else {
@@ -115,6 +140,7 @@ async function loadConfig(db: D1Database): Promise<TenantConfig> {
       stations: JSON.parse(row.stations as string),
       l3_statuses: JSON.parse(row.l3_statuses as string),
       l3_terminal_status: row.l3_terminal_status as string,
+      station_menus: JSON.parse((row.station_menus as string) || "[]"),
     };
   }
   cacheTime = Date.now();
@@ -318,16 +344,18 @@ app.put("/api/config", requireAuth("admin"), async (c) => {
     stations: body.stations || current.stations,
     l3_statuses: body.l3_statuses || current.l3_statuses,
     l3_terminal_status: body.l3_terminal_status || current.l3_terminal_status,
+    station_menus: body.station_menus || current.station_menus,
   };
 
   await c.env.DB.prepare(
-    "UPDATE config SET shop_type=?, entity_labels=?, stations=?, l3_statuses=?, l3_terminal_status=?, updated_at=datetime('now') WHERE id=1"
+    "UPDATE config SET shop_type=?, entity_labels=?, stations=?, l3_statuses=?, l3_terminal_status=?, station_menus=?, updated_at=datetime('now') WHERE id=1"
   ).bind(
     updated.shop_type,
     JSON.stringify(updated.entity_labels),
     JSON.stringify(updated.stations),
     JSON.stringify(updated.l3_statuses),
     updated.l3_terminal_status,
+    JSON.stringify(updated.station_menus),
   ).run();
 
   cachedConfig = null;
@@ -340,13 +368,14 @@ app.post("/api/config/reset", requireAuth("admin"), async (c) => {
   if (!tpl) return c.json({ error: `Unknown shop type: ${shop_type}. Available: ${Object.keys(SHOP_TEMPLATES).join(", ")}` }, 400);
 
   await c.env.DB.prepare(
-    "INSERT OR REPLACE INTO config (id, shop_type, entity_labels, stations, l3_statuses, l3_terminal_status, updated_at) VALUES (1,?,?,?,?,?,datetime('now'))"
+    "INSERT OR REPLACE INTO config (id, shop_type, entity_labels, stations, l3_statuses, l3_terminal_status, station_menus, updated_at) VALUES (1,?,?,?,?,?,?,datetime('now'))"
   ).bind(
     shop_type,
     JSON.stringify(tpl.entity_labels),
     JSON.stringify(tpl.stations),
     JSON.stringify(tpl.l3_statuses),
     tpl.l3_terminal_status,
+    JSON.stringify(tpl.station_menus),
   ).run();
 
   cachedConfig = null;
@@ -1492,5 +1521,17 @@ app.get("/takt", requireAuth("lead"), (c) => c.html(taktPage(c.get("config"), c.
 app.get("/admin", requireAuth("admin"), (c) => c.html(adminPage(c.get("config"), c.get("user")!)));
 app.get("/workbench", requireAuth(), (c) => c.html(workbenchPage(c.get("config"), c.get("user")!)));
 app.get("/fixit", requireAuth(), (c) => c.html(fixitPage(c.get("config"), c.get("user")!)));
+
+app.get("/menu/:slug", requireAuth(), (c) => {
+  const config = c.get("config");
+  const user = c.get("user")!;
+  const slug = c.req.param("slug");
+  const menu = config.station_menus.find((m: { slug: string }) => m.slug === slug);
+  if (!menu) return c.text("Station menu not found", 404);
+  const userLevel = { user: 0, lead: 1, supervisor: 2, admin: 3 }[user.role] || 0;
+  const minLevel = { user: 0, lead: 1, supervisor: 2, admin: 3 }[menu.minRole] || 0;
+  if (userLevel < minLevel) return c.text("Unauthorized", 403);
+  return c.html(stationMenuPage(config, user, menu));
+});
 
 export default app;
