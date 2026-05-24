@@ -49,6 +49,12 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
     .cab-meta-panel .meta-label:first-child { margin-top: 0; }
     .cab-meta-panel .meta-value { margin-top: 2px; white-space: pre-line; }
     .cab-meta-panel a { color: var(--accent); }
+    .flag-badges { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 3px; }
+    .flag-badge { display: inline-block; font-size: 0.6rem; font-weight: 700; padding: 2px 6px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.03em; }
+    .flag-hold { background: rgba(245,158,11,0.2); color: #f59e0b; }
+    .flag-remake { background: rgba(239,68,68,0.2); color: #ef4444; }
+    .flag-missing_part { background: rgba(139,92,246,0.2); color: #8b5cf6; }
+    .flag-priority { background: rgba(59,130,246,0.2); color: #3b82f6; }
   `, `
   <main>
     <div class="card" style="padding:10px 12px">
@@ -78,6 +84,16 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
     var LABELS = ${JSON.stringify(config.entity_labels)};
     ${displayStatusJS(config)}
     ${STATUS_COLOR_JS}
+
+    var FLAG_LABELS = { hold: 'Hold', remake: 'Remake', missing_part: 'Missing', priority: 'Priority' };
+    function renderFlagBadges(flags) {
+      if (!flags || !flags.length) return '';
+      var parsed = typeof flags === 'string' ? JSON.parse(flags) : flags;
+      if (!parsed.length) return '';
+      return '<div class="flag-badges">' + parsed.map(function(f) {
+        return '<span class="flag-badge flag-' + f + '">' + (FLAG_LABELS[f] || f) + '</span>';
+      }).join('') + '</div>';
+    }
 
     var selectedStation = localStorage.getItem('fw_station') || null;
     var selectedEntityId = null;
@@ -188,7 +204,7 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
         }
         entityList.innerHTML = jobData.cabinets.map(function(cab) {
           var row = '<div class="entity-row' + (selectedEntityId === cab.id ? ' selected' : '') + '" data-id="' + cab.id + '">' +
-            '<div><div class="name">' + LABELS.l3 + ' ' + cab.cabinet_number + '</div><div class="meta">' + (cab.label || '') + '</div></div>' +
+            '<div><div class="name">' + LABELS.l3 + ' ' + cab.cabinet_number + '</div><div class="meta">' + (cab.label || '') + '</div>' + renderFlagBadges(cab.flags) + '</div>' +
             '<span class="pill pill-' + pillColor(cab.status) + '">' + displayStatus(cab.status) + '</span></div>';
           if (cab.accessories || cab.notes || cab.assembly_sheet_url) {
             row += '<div class="cab-meta-panel">';
@@ -337,6 +353,45 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
           pendingStation = slug;
           showToast(station.name + ' — scan a ' + LABELS.l3.toLowerCase());
         }
+        return;
+      }
+
+      if (type === 'flag') {
+        var flagSlug = parts[2];
+        var FLAG_NAMES = { hold: 'On Hold', remake: 'Needs Remake', missing_part: 'Missing Part', priority: 'Priority' };
+        if (!FLAG_NAMES[flagSlug]) {
+          resultDiv.className = 'result error';
+          resultDiv.innerHTML = 'Unknown flag: ' + flagSlug;
+          resultDiv.style.display = 'block';
+          return;
+        }
+        if (!selectedEntityId) {
+          resultDiv.className = 'result error';
+          resultDiv.innerHTML = 'Select a ' + LABELS.l3.toLowerCase() + ' first, then scan the flag';
+          resultDiv.style.display = 'block';
+          return;
+        }
+        fetch('/api/cabinets/' + selectedEntityId + '/flag', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ flag: flagSlug, action: 'add' }),
+        }).then(function(r) { return r.json(); }).then(function(d) {
+          if (d.ok) {
+            resultDiv.className = 'result success';
+            resultDiv.innerHTML = FLAG_NAMES[flagSlug] + ' flag applied';
+            resultDiv.style.display = 'block';
+            if (jobData) {
+              fetch('/api/jobs/' + jobData.id).then(function(r2) { return r2.json(); }).then(function(detail) {
+                jobData = detail;
+                loadJobContext();
+              });
+            }
+          } else {
+            resultDiv.className = 'result error';
+            resultDiv.innerHTML = d.error || 'Failed to apply flag';
+            resultDiv.style.display = 'block';
+          }
+        });
         return;
       }
 

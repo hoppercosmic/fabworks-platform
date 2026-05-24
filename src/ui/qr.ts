@@ -47,14 +47,15 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
     }
   `, `
   <main>
-    ${isAdmin ? `<div class="card">
+    <div class="card">
       <div class="qr-tabs" id="qr-tabs">
-        <button data-tab="stations">Stations</button>
+        ${isAdmin ? '<button data-tab="stations">Stations</button>' : ''}
         <button class="active" data-tab="job">Job Labels</button>
-        <button data-tab="system">System</button>
+        <button data-tab="flags">Flags</button>
+        ${isAdmin ? '<button data-tab="system">System</button>' : ''}
       </div>
     </div>
-    <div id="tab-stations" style="display:none">
+    ${isAdmin ? `<div id="tab-stations" style="display:none">
       <div class="qr-grid" id="station-grid"></div>
     </div>` : ''}
     <div id="tab-job">
@@ -63,6 +64,11 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
         <select class="job-select" id="job-select"><option value="">— Choose a job —</option></select>
       </div>
       <div id="job-qr-content"></div>
+    </div>
+    <div id="tab-flags" style="display:none">
+      <div class="qr-section">Cabinet Flags</div>
+      <p style="font-size:0.8rem;color:var(--muted);margin:4px 0 8px">Print and stick on cabinets to mark issues. Scan with a cabinet selected to apply.</p>
+      <div class="qr-grid" id="flag-grid"></div>
     </div>
     ${isAdmin ? `<div id="tab-system" style="display:none">
       <div class="qr-section">System Commands</div>
@@ -87,24 +93,26 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
     var LABELS = ${JSON.stringify(config.entity_labels)};
     var activeTab = 'job';
 
-    // --- Tabs (admin only) ---
+    // --- Tabs ---
     var tabs = document.getElementById('qr-tabs');
     var tabStations = document.getElementById('tab-stations');
     var tabJob = document.getElementById('tab-job');
+    var tabFlags = document.getElementById('tab-flags');
     var tabSystem = document.getElementById('tab-system');
-    if (tabs) {
-      tabs.addEventListener('click', function(e) {
-        var btn = e.target.closest('button');
-        if (!btn) return;
-        activeTab = btn.dataset.tab;
-        tabs.querySelectorAll('button').forEach(function(b) { b.classList.remove('active'); });
-        btn.classList.add('active');
-        if (tabStations) tabStations.style.display = activeTab === 'stations' ? '' : 'none';
-        tabJob.style.display = activeTab === 'job' ? '' : 'none';
-        if (tabSystem) tabSystem.style.display = activeTab === 'system' ? '' : 'none';
-        if (activeTab === 'system' && !systemRendered) renderSystem();
-      });
-    }
+    var flagsRendered = false;
+    tabs.addEventListener('click', function(e) {
+      var btn = e.target.closest('button');
+      if (!btn) return;
+      activeTab = btn.dataset.tab;
+      tabs.querySelectorAll('button').forEach(function(b) { b.classList.remove('active'); });
+      btn.classList.add('active');
+      if (tabStations) tabStations.style.display = activeTab === 'stations' ? '' : 'none';
+      tabJob.style.display = activeTab === 'job' ? '' : 'none';
+      tabFlags.style.display = activeTab === 'flags' ? '' : 'none';
+      if (tabSystem) tabSystem.style.display = activeTab === 'system' ? '' : 'none';
+      if (activeTab === 'flags' && !flagsRendered) renderFlags();
+      if (activeTab === 'system' && !systemRendered) renderSystem();
+    });
 
     // --- Spotlight (full-screen QR for device-to-device scanning) ---
     var spotlight = document.getElementById('spotlight');
@@ -275,6 +283,37 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
         card.appendChild(sub);
         card.addEventListener('click', function() { showSpotlight(code, s.name, s.level.toUpperCase() + ' Station'); });
         staGrid.appendChild(card);
+      });
+    }
+
+    // --- Flags tab ---
+    var FLAG_ITEMS = [
+      { slug: 'hold',         title: 'On Hold',       sub: 'Cabinet is on hold for a fix',         color: '#f59e0b' },
+      { slug: 'remake',       title: 'Needs Remake',   sub: 'Cabinet needs complete remake',        color: '#ef4444' },
+      { slug: 'missing_part', title: 'Missing Part',   sub: 'Missing an accessory or part',         color: '#8b5cf6' },
+      { slug: 'priority',     title: 'Priority',       sub: 'Rush / priority item',                 color: '#3b82f6' },
+    ];
+
+    function renderFlags() {
+      flagsRendered = true;
+      var grid = document.getElementById('flag-grid');
+      grid.innerHTML = '';
+      FLAG_ITEMS.forEach(function(f) {
+        var card = document.createElement('div');
+        card.className = 'qr-card';
+        card.style.borderLeft = '4px solid ' + f.color;
+        var code = 'fw:flag:' + f.slug;
+        makeQRImg(code, 220, function(img) { card.insertBefore(img, card.firstChild); });
+        var t = document.createElement('div');
+        t.className = 'qr-title';
+        t.textContent = f.title;
+        card.appendChild(t);
+        var sub = document.createElement('div');
+        sub.className = 'qr-sub';
+        sub.textContent = f.sub;
+        card.appendChild(sub);
+        card.addEventListener('click', function() { showSpotlight(code, f.title, f.sub); });
+        grid.appendChild(card);
       });
     }
 

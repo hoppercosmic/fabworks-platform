@@ -1174,6 +1174,41 @@ app.put("/api/cabinets/:id/metadata", requireAuth("lead"), async (c) => {
   return c.json({ ok: true });
 });
 
+// --- Cabinet flags ---
+
+const VALID_FLAGS = ["hold", "remake", "missing_part", "priority"] as const;
+const FLAG_LABELS: Record<string, string> = {
+  hold: "On Hold",
+  remake: "Needs Remake",
+  missing_part: "Missing Part",
+  priority: "Priority",
+};
+
+app.post("/api/cabinets/:id/flag", requireAuth("lead"), async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  const { flag, action } = await c.req.json<{ flag: string; action?: "add" | "remove" }>();
+  if (!VALID_FLAGS.includes(flag as typeof VALID_FLAGS[number])) {
+    return c.json({ error: "Invalid flag" }, 400);
+  }
+  const cab = await c.env.DB.prepare("SELECT flags FROM cabinets WHERE id = ?").bind(id).first<{ flags: string }>();
+  if (!cab) return c.json({ error: "Cabinet not found" }, 404);
+
+  const flags: string[] = JSON.parse(cab.flags || "[]");
+  const op = action || (flags.includes(flag) ? "remove" : "add");
+  let updated: string[];
+  if (op === "add") {
+    updated = flags.includes(flag) ? flags : [...flags, flag];
+  } else {
+    updated = flags.filter((f) => f !== flag);
+  }
+  await c.env.DB.prepare("UPDATE cabinets SET flags = ? WHERE id = ?").bind(JSON.stringify(updated), id).run();
+  return c.json({ ok: true, flags: updated });
+});
+
+app.get("/api/flags", requireAuth(), (c) => {
+  return c.json({ flags: VALID_FLAGS, labels: FLAG_LABELS });
+});
+
 app.get("/api/stations/:slug/staging", async (c) => {
   const config = c.get("config");
   const slug = c.req.param("slug");
