@@ -455,6 +455,61 @@ const USER_MENU_JS = `
 
       function onGlobalQR(text) {
         stopGlobalScanner();
+        if (!text || !text.startsWith('fw:')) {
+          if (typeof window._fabworksHandleQR === 'function') {
+            window._fabworksHandleQR(text);
+          }
+          return;
+        }
+        var parts = text.split(':');
+        var action = parts[1];
+
+        if (action === 'build' && parts[2]) {
+          var bp = parts[2].split('-');
+          var jobNum = bp[0];
+          var cabNum = bp.length > 1 ? bp[1] : null;
+          fetch('/api/jobs?status=active')
+            .then(function(r) { return r.json(); })
+            .then(function(jobs) {
+              var job = jobs.find(function(j) { return j.job_number === jobNum; });
+              if (!job) { alert('Job ' + jobNum + ' not found'); return; }
+              return fetch('/api/jobs/' + job.id).then(function(r) { return r.json(); });
+            })
+            .then(function(detail) {
+              if (!detail || detail.error) return;
+              var cab = cabNum
+                ? detail.cabinets.find(function(c) { return String(c.cabinet_number) === cabNum; })
+                : detail.cabinets[0];
+              if (!cab) { alert('Cabinet not found in job ' + jobNum); return; }
+              fetch('/api/build/start', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cabinet_id: cab.id })
+              }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+              .then(function(r) {
+                if (r.ok || r.data.active_session_id) {
+                  window.location.href = '/workbench';
+                } else {
+                  alert(r.data.error || 'Failed to start build');
+                }
+              });
+            });
+          return;
+        }
+
+        if (action === 'menu' && parts[2]) {
+          window.location.href = '/menu/' + parts[2];
+          return;
+        }
+
+        if (action === 'cmd') {
+          var cmd = parts[2];
+          if (cmd === 'staging') { window.location.href = '/staging'; return; }
+          if (cmd === 'dashboard') { window.location.href = '/dashboard'; return; }
+          if (cmd === 'whoami') { window.location.href = '/profile'; return; }
+          if (cmd === 'status') { window.location.href = '/dashboard'; return; }
+        }
+
         if (typeof window._fabworksHandleQR === 'function') {
           window._fabworksHandleQR(text);
         } else {

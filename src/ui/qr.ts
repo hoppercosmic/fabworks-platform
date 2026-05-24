@@ -213,6 +213,17 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
           html += '<div class="qr-sub">' + escHtml(label) + '</div></div>';
         });
         html += '</div>';
+
+        html += '<div class="qr-section">Build Start QRs</div><div class="qr-grid">';
+        job.cabinets.forEach(function(c) {
+          var buildCode = 'fw:build:' + job.job_number + '-' + c.cabinet_number;
+          var label = c.label || (LABELS.l3 + ' ' + c.cabinet_number);
+          html += '<div class="qr-card" style="border-left:3px solid var(--success)" data-code="' + buildCode + '" data-title="Build ' + escHtml(label) + '" data-sub="Scan to start build timer">';
+          html += '<img id="qr-build-' + c.id + '" width="220" height="220" alt="QR" />';
+          html += '<div class="qr-title">Build #' + c.cabinet_number + '</div>';
+          html += '<div class="qr-sub" style="color:var(--success)">Scan → Start Timer</div></div>';
+        });
+        html += '</div>';
       }
 
       jobContent.innerHTML = html;
@@ -225,6 +236,10 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
       job.cabinets.forEach(function(c) {
         var label = c.label || (LABELS.l3 + ' ' + c.cabinet_number);
         QRCode.toDataURL('fw:l3:' + c.id + ':' + label, { width: 220, margin: 1 }, function(e, u) { document.getElementById('qr-cab-' + c.id).src = u; });
+        QRCode.toDataURL('fw:build:' + job.job_number + '-' + c.cabinet_number, { width: 220, margin: 1 }, function(e, u) {
+          var el = document.getElementById('qr-build-' + c.id);
+          if (el) el.src = u;
+        });
       });
 
       // Click-to-spotlight
