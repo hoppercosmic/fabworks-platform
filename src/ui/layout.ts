@@ -451,6 +451,7 @@ export function page(title: string, extraStyles: string, body: string, script: s
       <button class="user-avatar" id="user-avatar-btn">${user.name.charAt(0).toUpperCase()}</button>
       <div class="user-dropdown" id="user-dropdown">
         <div class="ud-info"><div class="ud-name">${user.name}</div><div class="ud-role">${user.role}</div></div>
+        <a href="/profile">Profile</a>
         <a href="#" id="set-home-link">Set as Home</a>
         <a href="#" id="logout-link">Log out</a>
       </div>

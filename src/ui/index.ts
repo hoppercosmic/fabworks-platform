@@ -9,3 +9,4 @@ export { adminPage } from "./admin";
 export { workbenchPage, myWorkbenchPage } from "./workbench";
 export { fixitPage } from "./fixit";
 export { stationMenuPage } from "./station-menu";
+export { profilePage } from "./profile";

@@ -1,0 +1,3 @@
+ALTER TABLE users ADD COLUMN avatar_key TEXT;
+ALTER TABLE users ADD COLUMN team TEXT;
+ALTER TABLE users ADD COLUMN current_station TEXT;

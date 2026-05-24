@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage, workbenchPage, fixitPage, myWorkbenchPage, qrPage, stationMenuPage } from "./ui/index";
+import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage, workbenchPage, fixitPage, myWorkbenchPage, qrPage, stationMenuPage, profilePage } from "./ui/index";
 
 // --- Types ---
 
@@ -278,6 +278,38 @@ app.put("/api/auth/home", requireAuth(), async (c) => {
   }
   await c.env.DB.prepare("UPDATE users SET home_page = ? WHERE id = ?").bind(home_page, user.id).run();
   return c.json({ ok: true, home_page });
+});
+
+// --- User Profile ---
+
+app.get("/api/profile", requireAuth(), async (c) => {
+  const user = c.get("user")!;
+  const profile = await c.env.DB.prepare(
+    "SELECT id, name, email, role, home_page, team, current_station, avatar_key, created_at FROM users WHERE id = ?"
+  ).bind(user.id).first();
+  return c.json(profile);
+});
+
+app.put("/api/profile", requireAuth(), async (c) => {
+  const user = c.get("user")!;
+  const body = await c.req.json<{ name?: string; email?: string; pin?: string; team?: string; current_station?: string }>();
+  const sets: string[] = [];
+  const vals: any[] = [];
+  if (body.name) { sets.push("name = ?"); vals.push(body.name.trim()); }
+  if (body.email) { sets.push("email = ?"); vals.push(body.email.trim()); }
+  if (body.pin) {
+    if (body.pin.length < 4) return c.json({ error: "PIN must be at least 4 characters" }, 400);
+    sets.push("pin = ?"); vals.push(await hashPin(body.pin));
+  }
+  if (body.team !== undefined) { sets.push("team = ?"); vals.push(body.team || null); }
+  if (body.current_station !== undefined) { sets.push("current_station = ?"); vals.push(body.current_station || null); }
+  if (sets.length === 0) return c.json({ error: "Nothing to update" }, 400);
+  vals.push(user.id);
+  await c.env.DB.prepare(`UPDATE users SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
+  const updated = await c.env.DB.prepare(
+    "SELECT id, name, email, role, home_page, team, current_station, avatar_key, created_at FROM users WHERE id = ?"
+  ).bind(user.id).first();
+  return c.json(updated);
 });
 
 // --- User Management (admin only) ---
@@ -592,6 +624,107 @@ app.get("/api/scans/recent", async (c) => {
      LIMIT ?`
   ).bind(limit).all();
   return c.json(result.results);
+});
+
+// --- Daily Briefs ---
+
+app.get("/api/briefs/today", requireAuth(), async (c) => {
+  const today = new Date().toISOString().slice(0, 10);
+  const brief = await c.env.DB.prepare(
+    "SELECT db.*, u.name as author_name FROM daily_briefs db JOIN users u ON db.created_by = u.id WHERE db.brief_date = ?"
+  ).bind(today).first();
+  return c.json(brief || { brief_date: today, content: "", author_name: null });
+});
+
+app.put("/api/briefs/today", requireAuth("lead"), async (c) => {
+  const user = c.get("user")!;
+  const { content } = await c.req.json<{ content: string }>();
+  if (content === undefined) return c.json({ error: "content required" }, 400);
+  const today = new Date().toISOString().slice(0, 10);
+  const result = await c.env.DB.prepare(
+    `INSERT INTO daily_briefs (brief_date, content, created_by) VALUES (?, ?, ?)
+     ON CONFLICT(brief_date) DO UPDATE SET content = excluded.content, created_by = excluded.created_by`
+  ).bind(today, content, user.id).run();
+  return c.json({ ok: true, brief_date: today });
+});
+
+// --- Job Detail Updates ---
+
+app.put("/api/jobs/:id", requireAuth("lead"), async (c) => {
+  const id = c.req.param("id");
+  const body = await c.req.json<{
+    finish_details?: string;
+    engineering_notes?: string;
+    external_links?: string;
+    status?: string;
+  }>();
+  const sets: string[] = [];
+  const vals: any[] = [];
+  if (body.finish_details !== undefined) { sets.push("finish_details = ?"); vals.push(body.finish_details); }
+  if (body.engineering_notes !== undefined) { sets.push("engineering_notes = ?"); vals.push(body.engineering_notes); }
+  if (body.external_links !== undefined) { sets.push("external_links = ?"); vals.push(body.external_links); }
+  if (body.status !== undefined) { sets.push("status = ?"); vals.push(body.status); }
+  if (sets.length === 0) return c.json({ error: "No fields to update" }, 400);
+  vals.push(id);
+  await c.env.DB.prepare(`UPDATE jobs SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
+  const job = await c.env.DB.prepare("SELECT * FROM jobs WHERE id = ?").bind(id).first();
+  return c.json(job);
+});
+
+// --- Notes ---
+
+app.get("/api/notes", requireAuth(), async (c) => {
+  const contextType = c.req.query("context_type");
+  const contextId = c.req.query("context_id");
+  if (!contextType || !contextId) return c.json({ error: "context_type and context_id required" }, 400);
+  const result = await c.env.DB.prepare(
+    `SELECT n.*, u.name as author_name FROM notes n
+     JOIN users u ON n.created_by = u.id
+     WHERE n.context_type = ? AND n.context_id = ?
+     ORDER BY n.created_at DESC`
+  ).bind(contextType, contextId).all();
+  return c.json(result.results);
+});
+
+app.post("/api/notes", requireAuth(), async (c) => {
+  const user = c.get("user")!;
+  const { context_type, context_id, title, content } = await c.req.json<{
+    context_type: string;
+    context_id: string;
+    title?: string;
+    content: string;
+  }>();
+  if (!context_type || !context_id || !content) return c.json({ error: "context_type, context_id, and content required" }, 400);
+  const result = await c.env.DB.prepare(
+    "INSERT INTO notes (context_type, context_id, title, content, created_by) VALUES (?, ?, ?, ?, ?) RETURNING *"
+  ).bind(context_type, context_id, title || null, content, user.id).first();
+  return c.json(result, 201);
+});
+
+app.put("/api/notes/:id", requireAuth(), async (c) => {
+  const user = c.get("user")!;
+  const id = c.req.param("id");
+  const note = await c.env.DB.prepare("SELECT * FROM notes WHERE id = ?").bind(id).first() as any;
+  if (!note) return c.json({ error: "Note not found" }, 404);
+  const isLead = ROLE_LEVELS[user.role] >= ROLE_LEVELS.lead;
+  if (note.created_by !== user.id && !isLead) return c.json({ error: "Unauthorized" }, 403);
+  const { title, content } = await c.req.json<{ title?: string; content?: string }>();
+  await c.env.DB.prepare(
+    "UPDATE notes SET title = COALESCE(?, title), content = COALESCE(?, content), updated_at = datetime('now') WHERE id = ?"
+  ).bind(title ?? null, content ?? null, id).run();
+  const updated = await c.env.DB.prepare("SELECT n.*, u.name as author_name FROM notes n JOIN users u ON n.created_by = u.id WHERE n.id = ?").bind(id).first();
+  return c.json(updated);
+});
+
+app.delete("/api/notes/:id", requireAuth(), async (c) => {
+  const user = c.get("user")!;
+  const id = c.req.param("id");
+  const note = await c.env.DB.prepare("SELECT * FROM notes WHERE id = ?").bind(id).first() as any;
+  if (!note) return c.json({ error: "Note not found" }, 404);
+  const isLead = ROLE_LEVELS[user.role] >= ROLE_LEVELS.lead;
+  if (note.created_by !== user.id && !isLead) return c.json({ error: "Unauthorized" }, 403);
+  await c.env.DB.prepare("DELETE FROM notes WHERE id = ?").bind(id).run();
+  return c.json({ ok: true });
 });
 
 // --- Assembly metrics ---
@@ -1521,6 +1654,7 @@ app.get("/takt", requireAuth("lead"), (c) => c.html(taktPage(c.get("config"), c.
 app.get("/admin", requireAuth("admin"), (c) => c.html(adminPage(c.get("config"), c.get("user")!)));
 app.get("/workbench", requireAuth(), (c) => c.html(workbenchPage(c.get("config"), c.get("user")!)));
 app.get("/fixit", requireAuth(), (c) => c.html(fixitPage(c.get("config"), c.get("user")!)));
+app.get("/profile", requireAuth(), (c) => c.html(profilePage(c.get("config"), c.get("user")!)));
 
 app.get("/menu/:slug", requireAuth(), (c) => {
   const config = c.get("config");
