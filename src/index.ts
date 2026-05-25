@@ -1984,17 +1984,41 @@ app.get("/api/build/active", requireAuth(), async (c) => {
   return c.json({ session: session || null });
 });
 
-app.get("/api/build/:id", requireAuth(), async (c) => {
-  const user = c.get("user")!;
-  const id = parseInt(c.req.param("id"), 10);
-  const session = await c.env.DB.prepare(
-    `SELECT bs.*, cab.cabinet_number, cab.label, cab.accessories, cab.notes, cab.assembly_sheet_url,
-            j.job_number, j.job_name
+app.get("/api/build/all-active", requireAuth("lead"), async (c) => {
+  const result = await c.env.DB.prepare(
+    `SELECT bs.id, bs.started_at, bs.paused_at, bs.total_paused_seconds, bs.cabinet_id, bs.user_id,
+            cab.cabinet_number, cab.label, j.job_number, j.job_name, u.name as user_name
      FROM build_sessions bs
      JOIN cabinets cab ON bs.cabinet_id = cab.id
      JOIN jobs j ON bs.job_id = j.id
-     WHERE bs.id = ? AND bs.user_id = ?`
-  ).bind(id, user.id).first();
+     JOIN users u ON bs.user_id = u.id
+     WHERE bs.completed_at IS NULL
+     ORDER BY bs.started_at DESC`
+  ).all();
+  return c.json(result.results);
+});
+
+app.get("/api/build/:id", requireAuth(), async (c) => {
+  const user = c.get("user")!;
+  const id = parseInt(c.req.param("id"), 10);
+  const isLead = ROLE_LEVELS[user.role] >= ROLE_LEVELS.lead;
+  const query = isLead
+    ? `SELECT bs.*, cab.cabinet_number, cab.label, cab.accessories, cab.notes, cab.assembly_sheet_url,
+              j.job_number, j.job_name, u.name as user_name
+       FROM build_sessions bs
+       JOIN cabinets cab ON bs.cabinet_id = cab.id
+       JOIN jobs j ON bs.job_id = j.id
+       JOIN users u ON bs.user_id = u.id
+       WHERE bs.id = ?`
+    : `SELECT bs.*, cab.cabinet_number, cab.label, cab.accessories, cab.notes, cab.assembly_sheet_url,
+              j.job_number, j.job_name
+       FROM build_sessions bs
+       JOIN cabinets cab ON bs.cabinet_id = cab.id
+       JOIN jobs j ON bs.job_id = j.id
+       WHERE bs.id = ? AND bs.user_id = ?`;
+  const session = isLead
+    ? await c.env.DB.prepare(query).bind(id).first()
+    : await c.env.DB.prepare(query).bind(id, user.id).first();
   if (!session) return c.json({ error: "Session not found" }, 404);
   return c.json({ session });
 });
@@ -2003,10 +2027,11 @@ app.post("/api/build/:id/pause", requireAuth(), async (c) => {
   const user = c.get("user")!;
   const id = parseInt(c.req.param("id"), 10);
   const body = await c.req.json().catch(() => ({})) as { client_timestamp?: string };
+  const isLead = ROLE_LEVELS[user.role] >= ROLE_LEVELS.lead;
   const session = await c.env.DB.prepare(
     "SELECT id, paused_at, completed_at, user_id FROM build_sessions WHERE id = ?"
   ).bind(id).first<{ id: number; paused_at: string | null; completed_at: string | null; user_id: number }>();
-  if (!session || session.user_id !== user.id) return c.json({ error: "Session not found" }, 404);
+  if (!session || (!isLead && session.user_id !== user.id)) return c.json({ error: "Session not found" }, 404);
   if (session.completed_at) return c.json({ error: "Session already completed" }, 400);
   if (session.paused_at) return c.json({ error: "Already paused" }, 400);
 
@@ -2023,10 +2048,11 @@ app.post("/api/build/:id/resume", requireAuth(), async (c) => {
   const user = c.get("user")!;
   const id = parseInt(c.req.param("id"), 10);
   const body = await c.req.json().catch(() => ({})) as { client_timestamp?: string };
+  const isLead = ROLE_LEVELS[user.role] >= ROLE_LEVELS.lead;
   const session = await c.env.DB.prepare(
     "SELECT id, paused_at, completed_at, user_id, total_paused_seconds FROM build_sessions WHERE id = ?"
   ).bind(id).first<{ id: number; paused_at: string | null; completed_at: string | null; user_id: number; total_paused_seconds: number }>();
-  if (!session || session.user_id !== user.id) return c.json({ error: "Session not found" }, 404);
+  if (!session || (!isLead && session.user_id !== user.id)) return c.json({ error: "Session not found" }, 404);
   if (session.completed_at) return c.json({ error: "Session already completed" }, 400);
   if (!session.paused_at) return c.json({ error: "Not paused" }, 400);
 
@@ -2048,10 +2074,11 @@ app.post("/api/build/:id/complete", requireAuth(), async (c) => {
   const user = c.get("user")!;
   const id = parseInt(c.req.param("id"), 10);
   const body = await c.req.json().catch(() => ({})) as { client_timestamp?: string };
+  const isLead = ROLE_LEVELS[user.role] >= ROLE_LEVELS.lead;
   const session = await c.env.DB.prepare(
     "SELECT id, cabinet_id, job_id, paused_at, completed_at, user_id, total_paused_seconds, started_at FROM build_sessions WHERE id = ?"
   ).bind(id).first<{ id: number; cabinet_id: number; job_id: number; paused_at: string | null; completed_at: string | null; user_id: number; total_paused_seconds: number; started_at: string }>();
-  if (!session || session.user_id !== user.id) return c.json({ error: "Session not found" }, 404);
+  if (!session || (!isLead && session.user_id !== user.id)) return c.json({ error: "Session not found" }, 404);
   if (session.completed_at) return c.json({ ok: true, already_completed: true }, 200);
 
   const useClientTs = c.req.header("X-Offline-Queued") && body.client_timestamp && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(body.client_timestamp);

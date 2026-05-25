@@ -1,5 +1,5 @@
 import type { TenantConfig, SessionUser } from "../index";
-import { page, displayStatusJS, SHARED_JS } from "./layout";
+import { page, displayStatusJS, SHARED_JS, ROLE_LEVELS } from "./layout";
 
 export function workbenchPage(config: TenantConfig, user: SessionUser): string {
   return page("Build", `
@@ -455,6 +455,15 @@ export function myWorkbenchPage(config: TenantConfig, user: SessionUser): string
     .recent-row .rr-time { color: var(--success); font-weight: 600; }
     .recent-row .rr-ago { color: var(--muted); font-size: 0.75rem; }
     .empty-msg { text-align: center; padding: 2rem 1rem; color: var(--muted); font-size: 0.9rem; }
+    .all-build-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px; display: flex; justify-content: space-between; align-items: center; }
+    .all-build-card .ab-left { display: flex; flex-direction: column; gap: 2px; }
+    .all-build-card .ab-user { font-weight: 700; font-size: 0.85rem; }
+    .all-build-card .ab-detail { font-size: 0.78rem; color: var(--muted); }
+    .all-build-card .ab-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; }
+    .all-build-card .ab-elapsed { font-family: 'SF Mono','Cascadia Code','Consolas',monospace; font-weight: 600; font-size: 0.85rem; }
+    .all-build-card .ab-elapsed.paused { color: var(--warning, #f59e0b); }
+    .all-build-card .ab-actions { display: flex; gap: 4px; }
+    .all-build-card .ab-actions button { padding: 4px 8px; font-size: 0.7rem; font-weight: 600; border: none; border-radius: 4px; cursor: pointer; }
     .home-picker { margin-top: 0.5rem; }
     .home-picker select { width: auto; padding: 6px 10px; font-size: 0.8rem; }
     .home-picker .label { font-size: 0.7rem; color: var(--muted); }
@@ -470,6 +479,11 @@ export function myWorkbenchPage(config: TenantConfig, user: SessionUser): string
         <div class="ab-status" id="ab-status">Working</div>
         <div class="ab-cab" id="ab-cab"></div>
       </div>
+    </div>
+
+    <div id="all-builds-section" style="display:none">
+      <div class="section-title">All Active Builds</div>
+      <div class="avail-list" id="all-builds-list"></div>
     </div>
 
     <div id="avail-section">
@@ -562,6 +576,61 @@ export function myWorkbenchPage(config: TenantConfig, user: SessionUser): string
           }).join('');
         }
       });
+
+    var IS_LEAD = ${ROLE_LEVELS[user.role]} >= 1;
+    if (IS_LEAD) {
+      fetch('/api/build/all-active').then(function(r) { return r.json(); }).then(function(builds) {
+        if (!builds || builds.length === 0) return;
+        document.getElementById('all-builds-section').style.display = 'block';
+        var list = document.getElementById('all-builds-list');
+        list.innerHTML = builds.map(function(b) {
+          var startMs = new Date(b.started_at + 'Z').getTime();
+          var pausedTotal = (b.total_paused_seconds || 0) * 1000;
+          var elapsed = (Date.now() - startMs) / 1000 - pausedTotal / 1000;
+          var isPaused = !!b.paused_at;
+          if (isPaused) elapsed -= (Date.now() - new Date(b.paused_at + 'Z').getTime()) / 1000;
+          var pausedCls = isPaused ? ' paused' : '';
+          return '<div class="all-build-card" data-id="' + b.id + '">'
+            + '<div class="ab-left">'
+            +   '<div class="ab-user">' + escHtml(b.user_name) + '</div>'
+            +   '<div class="ab-detail">${L3} #' + b.cabinet_number + (b.label ? ' — ' + escHtml(b.label) : '') + ' · ' + escHtml(b.job_number) + '</div>'
+            + '</div>'
+            + '<div class="ab-right">'
+            +   '<span class="ab-elapsed' + pausedCls + '" data-start="' + b.started_at + '" data-paused-at="' + (b.paused_at || '') + '" data-paused-total="' + (b.total_paused_seconds || 0) + '">' + fmtTime(elapsed) + '</span>'
+            +   '<div class="ab-actions">'
+            +     (isPaused
+                    ? '<button style="background:var(--accent);color:#fff" onclick="resumeBuild(' + b.id + ')">Resume</button>'
+                    : '<button style="background:var(--warning,#f59e0b);color:#000" onclick="pauseBuild(' + b.id + ')">Pause</button>')
+            +     '<button style="background:var(--success);color:#fff" onclick="completeBuild(' + b.id + ')">Complete</button>'
+            +   '</div>'
+            + '</div></div>';
+        }).join('');
+
+        setInterval(function() {
+          document.querySelectorAll('.all-build-card .ab-elapsed').forEach(function(el) {
+            var startMs = new Date(el.dataset.start + 'Z').getTime();
+            var pausedTotal = (parseInt(el.dataset.pausedTotal) || 0) * 1000;
+            var elapsed = (Date.now() - startMs) / 1000 - pausedTotal / 1000;
+            if (el.dataset.pausedAt) elapsed -= (Date.now() - new Date(el.dataset.pausedAt + 'Z').getTime()) / 1000;
+            el.textContent = fmtTime(elapsed);
+          });
+        }, 1000);
+      });
+    }
+
+    function pauseBuild(id) {
+      fetch('/api/build/' + id + '/pause', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+        .then(function() { location.reload(); });
+    }
+    function resumeBuild(id) {
+      fetch('/api/build/' + id + '/resume', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+        .then(function() { location.reload(); });
+    }
+    function completeBuild(id) {
+      if (!confirm('Mark this build complete?')) return;
+      fetch('/api/build/' + id + '/complete', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+        .then(function() { location.reload(); });
+    }
 
     document.getElementById('home-select').addEventListener('change', function(e) {
       fetch('/api/auth/home', {
