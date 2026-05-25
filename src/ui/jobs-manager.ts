@@ -10,7 +10,7 @@ export function jobsManagerPage(config: TenantConfig, user: SessionUser): string
   ).join('');
 
   return page("Jobs Manager", `
-    main { gap: 14px; }
+
     .tabs { display: flex; gap: 0; border-bottom: 2px solid var(--border); margin-bottom: 14px; }
     .tab-btn { padding: 10px 16px; font-size: 0.82rem; font-weight: 600; background: none; border: none; color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -2px; }
     .tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }

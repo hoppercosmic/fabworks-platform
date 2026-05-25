@@ -4,7 +4,7 @@ import { page, SHARED_JS } from "./layout";
 export function fixitPage(config: TenantConfig, user: SessionUser): string {
   const isLead = (["lead", "supervisor", "admin"] as UserRole[]).includes(user.role);
   return page("FixIt", `
-    main { gap: 14px; }
+
     .controls { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
     .controls select { width: auto; padding: 8px 12px; font-size: 0.85rem; }
     .controls .label { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }

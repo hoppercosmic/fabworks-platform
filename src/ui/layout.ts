@@ -185,17 +185,17 @@ export const SHARED_STYLES = `
     .dd-role { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
     .dd-section { padding: 8px 14px 4px; font-size: 0.65rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
     main {
-      flex: 1; width: 100%; padding: 12px; margin: 0 auto;
-      display: flex; flex-direction: column; gap: 10px;
+      flex: 1; width: 100%; padding: 16px; margin: 0 auto;
+      display: flex; flex-direction: column; gap: 16px;
       max-width: 100%;
     }
-    @media (min-width: 768px) { main { padding: 16px 24px; max-width: 960px; } }
+    @media (min-width: 768px) { main { padding: 24px 32px; max-width: 960px; } }
     @media (min-width: 1200px) { main { max-width: 1100px; } }
     .card {
       background: var(--surface);
       border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 12px;
+      border-radius: 12px;
+      padding: 16px;
     }
     .scroll-list {
       flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;

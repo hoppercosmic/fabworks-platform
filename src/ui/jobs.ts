@@ -5,7 +5,7 @@ export function newJobPage(config: TenantConfig, user: SessionUser): string {
   const L1 = config.entity_labels.l1;
   const L3 = config.entity_labels.l3;
   return page(`New ${L1}`, `
-    main { gap: 14px; }
+
     .recent-job {
       display: flex; justify-content: space-between; align-items: center;
       padding: 10px 0; border-bottom: 1px solid var(--border); font-size: 0.85rem;
@@ -100,7 +100,7 @@ export function jobDetailPage(config: TenantConfig, user: SessionUser): string {
   const L2 = config.entity_labels.l2;
   const L3 = config.entity_labels.l3;
   return page(`${config.entity_labels.l1} Detail`, `
-    main { gap: 14px; }
+
     .job-title { font-size: 1.4rem; font-weight: 700; }
     .job-meta { font-size: 0.85rem; color: var(--muted); margin-top: 4px; }
     .section-title { font-size: 0.85rem; font-weight: 700; color: var(--text); margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; }
@@ -528,7 +528,7 @@ export function progressPage(config: TenantConfig, user: SessionUser): string {
   const L2 = config.entity_labels.l2;
   const L3 = config.entity_labels.l3;
   return page(`${config.entity_labels.l1} Progress`, `
-    main { gap: 14px; }
+
     .job-header-row { display: flex; justify-content: space-between; align-items: baseline; }
     .job-header-row h2 { font-size: 1.2rem; }
     .job-header-row a { color: var(--accent); text-decoration: none; font-size: 0.8rem; }

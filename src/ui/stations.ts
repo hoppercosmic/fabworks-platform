@@ -3,7 +3,7 @@ import { page, stationNamesJS, displayStatusJS, STATUS_COLOR_JS, ROLE_LEVELS, SH
 
 export function stationViewPage(config: TenantConfig, user: SessionUser): string {
   return page("Station View", `
-    main { gap: 12px; }
+
     .station-carousel { display: flex; align-items: center; justify-content: center; gap: 0; user-select: none; }
     .station-prev, .station-next {
       flex: 1; font-size: 0.75rem; color: var(--muted); opacity: 0.4; cursor: pointer;

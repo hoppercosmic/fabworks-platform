@@ -4,7 +4,7 @@ import { page, stationNamesJS, displayStatusJS, STATUS_COLOR_JS, SHARED_JS } fro
 export function stagingPage(config: TenantConfig, user: SessionUser): string {
   const L3 = config.entity_labels.l3;
   return page("Staging", `
-    main { gap: 12px; }
+
     .search-box { position: relative; }
     .search-box input { width: 100%; padding: 12px 14px 12px 38px; font-size: 0.95rem; box-sizing: border-box; }
     .search-box .search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--muted); font-size: 1rem; pointer-events: none; }

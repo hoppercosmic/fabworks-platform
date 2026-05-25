@@ -7,7 +7,7 @@ export function cabinetDetailPage(config: TenantConfig, user: SessionUser): stri
   const propsConfig = JSON.stringify(config.part_properties || []);
 
   return page(`${L3} Detail`, `
-    main { gap: 12px; }
+
     .detail-header { display: flex; align-items: center; gap: 10px; }
     .back-btn { color: var(--accent); text-decoration: none; font-size: 1.2rem; font-weight: 700; flex-shrink: 0; }
     .cab-title { font-size: 1.1rem; font-weight: 700; flex: 1; }

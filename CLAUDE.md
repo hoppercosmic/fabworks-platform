@@ -93,19 +93,26 @@ API: `POST /api/cabinets/:id/flag` (lead+). QR codes: `fw:flag:<slug>`.
 ## Session Continuity
 
 **Last session:** 2026-05-25
-**Last deploy:** `f8d898a9` — Reports page + CSV exports + weekly summary dashboard card
+**Last deploy:** `6be0f83f` — Push notifications (Phase 9)
 
-### What just shipped (Phase 8: Reporting / Export)
-- `/reports` page (lead+) with 3 tabs: Job Completion, Assembler Productivity, Quality/FixIt
-- `GET /api/reports/jobs` — active jobs with completion %, status breakdown
-- `GET /api/reports/jobs/csv` — CSV download of job completion data
-- `GET /api/reports/assemblers/csv?days=N` — CSV download of assembler productivity
-- `GET /api/reports/quality` — root cause breakdown, resolution time, top problem cabinets
-- `GET /api/reports/quality/csv?days=N` — CSV download of all FixIt requests
-- `GET /api/reports/weekly-summary` — rolling 7-day stats for dashboard card
-- "This Week" summary card on dashboard (lead+ only): jobs done, cabinets built, avg build, fixits
-- "Reports" link added to Tools dropdown nav
-- `csvRow()` / `csvResponse()` utility helpers (RFC 4180 compliant)
+### What just shipped (Phase 9: Push Notifications)
+- Web Push API with RFC 8291 encryption (pure Web Crypto, no Node.js deps)
+- `src/push.ts` — VAPID JWT signing, ECDH payload encryption, send helpers
+- `schema/017_push_subscriptions.sql` — per-device subscription storage
+- 4 API endpoints: `/api/push/vapid-key`, `/api/push/subscribe`, DELETE subscribe, `/api/push/status`
+- 4 notification triggers via `c.executionCtx.waitUntil()`:
+  - Build complete → leads/supervisors/admins
+  - FixIt submitted → leads/supervisors/admins
+  - FixIt resolved → original requester
+  - Cabinet flagged → leads/supervisors/admins (excluding flagger)
+- Service worker push + notificationclick handlers (SW_VERSION v2)
+- Profile page: Enable/Disable notifications toggle
+- VAPID keys stored as Wrangler secrets
+
+### Also shipped this session (Phase 8: Reporting / Export)
+- `/reports` page with 3 tabs + CSV downloads
+- Weekly summary card on dashboard
+- `csvRow()` / `csvResponse()` utilities
 
 ### Known gaps in offline mode (not yet addressed)
 - FixIt photo uploads: queued as text body only — binary photo serialization to IDB not yet implemented
@@ -114,11 +121,10 @@ API: `POST /api/cabinets/:id/flag` (lead+). QR codes: `fw:flag:<slug>`.
 - No queue size limit enforced (plan says 50 items max)
 
 ### Roadmap (next up, priority order)
-1. Notifications — push alerts (build complete, FixIt submitted)
-2. Asana integration — sync job status back to project management
-3. Multi-shift support / time tracking
-4. Google Workspace integration — pull job data from sheets
-5. Email digest — automated weekly summary to ownership
+1. Asana integration — sync job status back to project management
+2. Multi-shift support / time tracking
+3. Google Workspace integration — pull job data from sheets
+4. Email digest — automated weekly summary to ownership
 
 ### Completed phases
 - Phase 1: Cabinet Metadata & Assembly Sheet Links
@@ -129,3 +135,4 @@ API: `POST /api/cabinets/:id/flag` (lead+). QR codes: `fw:flag:<slug>`.
 - Phase 6: Offline Mode (service worker, queue, read cache)
 - Phase 7: Cabinet Detail Page + Properties System (detail page, per-shop-type property config, CSV import, clickable cabinets everywhere)
 - Phase 8: Reporting / Export (reports page, CSV downloads, weekly summary card)
+- Phase 9: Push Notifications (Web Push, role-based triggers, profile subscription UI)

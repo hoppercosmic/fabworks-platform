@@ -5,7 +5,7 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
   const L2 = config.entity_labels.l2;
   const L3 = config.entity_labels.l3;
   return page("FabWorks", `
-    main { gap: 12px; }
+
     #active-build-banner { background: rgba(245,158,11,0.15); border: 1px solid var(--warning, #f59e0b); color: var(--warning, #f59e0b); cursor: pointer; font-weight: 600; font-size: 0.9rem; text-align: center; padding: 10px; }
     .station-carousel { display: flex; align-items: center; justify-content: center; gap: 0; user-select: none; }
     .station-prev, .station-next {

@@ -3,7 +3,7 @@ import { page, SHARED_JS } from "./layout";
 
 export function reportsPage(config: TenantConfig, user: SessionUser): string {
   return page("Reports", `
-    main { gap: 14px; }
+
     .tabs { display: flex; gap: 0; border-bottom: 2px solid var(--border); margin-bottom: 14px; }
     .tab-btn {
       padding: 10px 18px; font-size: 0.85rem; font-weight: 600; cursor: pointer;

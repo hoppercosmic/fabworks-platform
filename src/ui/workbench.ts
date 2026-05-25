@@ -427,7 +427,7 @@ export function workbenchPage(config: TenantConfig, user: SessionUser): string {
 export function myWorkbenchPage(config: TenantConfig, user: SessionUser): string {
   const L3 = config.entity_labels.l3;
   return page("My Workbench", `
-    main { gap: 14px; }
+
     .greeting { font-size: 1.3rem; font-weight: 700; }
     .today-stat { display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--muted); }
     .today-stat .count { font-size: 1.4rem; font-weight: 700; color: var(--success); }
