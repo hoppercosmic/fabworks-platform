@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage, workbenchPage, fixitPage, myWorkbenchPage, qrPage, stationMenuPage, profilePage, stagingPage, cabinetDetailPage, reportsPage } from "./ui/index";
+import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage, workbenchPage, fixitPage, myWorkbenchPage, qrPage, stationMenuPage, profilePage, stagingPage, cabinetDetailPage, reportsPage, jobsManagerPage } from "./ui/index";
 import { SERVICE_WORKER_JS } from "./offline";
 import { notifyByRole, notifyUser } from "./push";
 
@@ -828,6 +828,9 @@ app.put("/api/briefs/today", requireAuth("lead"), async (c) => {
 app.put("/api/jobs/:id", requireAuth("lead"), async (c) => {
   const id = c.req.param("id");
   const body = await c.req.json<{
+    job_number?: string;
+    job_name?: string;
+    cabinet_count?: number;
     finish_details?: string;
     engineering_notes?: string;
     external_links?: string;
@@ -835,6 +838,9 @@ app.put("/api/jobs/:id", requireAuth("lead"), async (c) => {
   }>();
   const sets: string[] = [];
   const vals: any[] = [];
+  if (body.job_number !== undefined) { sets.push("job_number = ?"); vals.push(body.job_number); }
+  if (body.job_name !== undefined) { sets.push("job_name = ?"); vals.push(body.job_name); }
+  if (body.cabinet_count !== undefined) { sets.push("cabinet_count = ?"); vals.push(body.cabinet_count); }
   if (body.finish_details !== undefined) { sets.push("finish_details = ?"); vals.push(body.finish_details); }
   if (body.engineering_notes !== undefined) { sets.push("engineering_notes = ?"); vals.push(body.engineering_notes); }
   if (body.external_links !== undefined) { sets.push("external_links = ?"); vals.push(body.external_links); }
@@ -844,6 +850,39 @@ app.put("/api/jobs/:id", requireAuth("lead"), async (c) => {
   await c.env.DB.prepare(`UPDATE jobs SET ${sets.join(", ")} WHERE id = ?`).bind(...vals).run();
   const job = await c.env.DB.prepare("SELECT * FROM jobs WHERE id = ?").bind(id).first();
   return c.json(job);
+});
+
+// --- Bulk Cabinet Operations ---
+
+app.put("/api/cabinets/bulk", requireAuth("lead"), async (c) => {
+  const { ids, status, bucket_id } = await c.req.json<{
+    ids: number[];
+    status?: string;
+    bucket_id?: number | null;
+  }>();
+  if (!ids || ids.length === 0) return c.json({ error: "ids required" }, 400);
+  const placeholders = ids.map(() => "?").join(",");
+  let updated = 0;
+  if (status !== undefined) {
+    const r = await c.env.DB.prepare(`UPDATE cabinets SET status = ? WHERE id IN (${placeholders})`).bind(status, ...ids).run();
+    updated = r.meta.changes || ids.length;
+  } else if (bucket_id !== undefined) {
+    const r = await c.env.DB.prepare(`UPDATE cabinets SET bucket_id = ? WHERE id IN (${placeholders})`).bind(bucket_id, ...ids).run();
+    updated = r.meta.changes || ids.length;
+  } else {
+    return c.json({ error: "status or bucket_id required" }, 400);
+  }
+  return c.json({ updated });
+});
+
+app.delete("/api/cabinets/bulk", requireAuth("lead"), async (c) => {
+  const { ids } = await c.req.json<{ ids: number[] }>();
+  if (!ids || ids.length === 0) return c.json({ error: "ids required" }, 400);
+  const placeholders = ids.map(() => "?").join(",");
+  await c.env.DB.prepare(`DELETE FROM scans WHERE cabinet_id IN (${placeholders})`).bind(...ids).run();
+  await c.env.DB.prepare(`DELETE FROM build_sessions WHERE cabinet_id IN (${placeholders})`).bind(...ids).run();
+  const r = await c.env.DB.prepare(`DELETE FROM cabinets WHERE id IN (${placeholders})`).bind(...ids).run();
+  return c.json({ deleted: r.meta.changes || ids.length });
 });
 
 // --- Notes ---
@@ -2334,7 +2373,8 @@ app.get("/", requireAuth(), (c) => {
   }
 });
 app.get("/scan", requireAuth(), (c) => c.html(scanPage(c.get("config"), c.get("user")!)));
-app.get("/jobs/new", requireAuth("admin"), (c) => c.html(newJobPage(c.get("config"), c.get("user")!)));
+app.get("/jobs", requireAuth("lead"), (c) => c.html(jobsManagerPage(c.get("config"), c.get("user")!)));
+app.get("/jobs/new", requireAuth("lead"), (c) => c.redirect("/jobs"));
 app.get("/dashboard", requireAuth(), (c) => c.html(dashboardPage(c.get("config"), c.get("user")!)));
 app.get("/job/:id", requireAuth(), (c) => c.html(jobDetailPage(c.get("config"), c.get("user")!)));
 app.get("/stations", requireAuth(), (c) => c.html(stationViewPage(c.get("config"), c.get("user")!)));

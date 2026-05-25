@@ -1,6 +1,7 @@
 export { loginPage } from "./login";
 export { scanPage } from "./scan";
 export { newJobPage, jobDetailPage, progressPage } from "./jobs";
+export { jobsManagerPage } from "./jobs-manager";
 export { qrPage } from "./qr";
 export { dashboardPage } from "./dashboard";
 export { stationViewPage } from "./stations";
