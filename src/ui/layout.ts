@@ -197,6 +197,8 @@ export const SHARED_STYLES = `
       border-radius: 12px;
       padding: 16px;
     }
+    .card + .card { margin-top: 0; }
+    #content { display: flex; flex-direction: column; gap: 16px; }
     .scroll-list {
       flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch;
     }

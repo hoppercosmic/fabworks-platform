@@ -10,6 +10,7 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
 
     /* Splash mode */
     .splash { display: flex; flex-direction: column; gap: 16px; }
+    .splash .brief-card, .splash .quick-jobs { margin-bottom: 0; }
     .brief-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
     .brief-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
     .brief-header h3 { font-size: 0.95rem; font-weight: 700; }
@@ -33,13 +34,14 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
     .empty-msg a { color: var(--accent); text-decoration: none; }
 
     /* Job hub mode */
-    .job-hub { display: flex; flex-direction: column; gap: 14px; }
+    .job-hub { display: flex; flex-direction: column; gap: 16px; }
+    #job-detail { display: flex; flex-direction: column; gap: 16px; }
     .job-selector { display: flex; align-items: center; gap: 10px; }
     .job-selector select { flex: 1; padding: 14px 16px; font-size: 1.2rem; font-weight: 700; border: 2px solid var(--accent); border-radius: 12px; background: var(--surface); color: var(--text); appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%233b82f6'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; }
-    .hub-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .hub-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
     @media (max-width: 600px) { .hub-grid { grid-template-columns: 1fr; } }
 
-    .hub-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 14px; }
+    .hub-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
     .hub-card h4 { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); margin-bottom: 8px; }
     .hub-card-full { grid-column: 1 / -1; }
 
