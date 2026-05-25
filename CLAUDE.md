@@ -114,14 +114,17 @@ API: `POST /api/cabinets/:id/flag` (lead+). QR codes: `fw:flag:<slug>`.
 - Weekly summary card on dashboard
 - `csvRow()` / `csvResponse()` utilities
 
-### Known gaps in offline mode (not yet addressed)
-- FixIt photo uploads: queued as text body only — binary photo serialization to IDB not yet implemented
-- No client-side photo compression before queuing
-- No "pending queue viewer" UI (badge shows count but can't inspect/discard individual items yet)
-- No queue size limit enforced (plan says 50 items max)
+### Also shipped this session (Phase 10: Offline Queue Viewer + Photo Queuing)
+- Pending queue viewer panel: tap badge → slide-down overlay with all queued items
+- Per-item: type pill, human label, timestamp, retry count, retry/discard buttons
+- Discard all button, live updates via SW message bus, close on tap outside
+- SW commands: `retry-item`, `discard-item`, `discard-all`, `queue-fixit`
+- FixIt photo queuing: client-side compression (canvas 1200px, JPEG 0.7) → base64 to IDB
+- On drain: reconstructs FormData with photo blob from base64
+- Queue viewer shows camera icon (has photo) or warning icon (no photo) on FixIt items
 
 ### Roadmap (next up, priority order)
-1. Asana integration — sync job status back to project management
+1. Asana integration — workflow routing engine + bidirectional sync (scoping in progress, [Gemini] task created)
 2. Multi-shift support / time tracking
 3. Google Workspace integration — pull job data from sheets
 4. Email digest — automated weekly summary to ownership
@@ -136,3 +139,4 @@ API: `POST /api/cabinets/:id/flag` (lead+). QR codes: `fw:flag:<slug>`.
 - Phase 7: Cabinet Detail Page + Properties System (detail page, per-shop-type property config, CSV import, clickable cabinets everywhere)
 - Phase 8: Reporting / Export (reports page, CSV downloads, weekly summary card)
 - Phase 9: Push Notifications (Web Push, role-based triggers, profile subscription UI)
+- Phase 10: Offline Queue Viewer + Photo Queuing (pending panel UI, retry/discard, FixIt photo compression + IDB serialization)

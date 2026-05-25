@@ -384,17 +384,80 @@ export function workbenchPage(config: TenantConfig, user: SessionUser): string {
       fixitOverlay.classList.remove('active');
     });
 
+    function _fwCompressPhoto(file) {
+      return new Promise(function(resolve) {
+        if (!file) { resolve(null); return; }
+        var reader = new FileReader();
+        reader.onload = function(e) {
+          var img = new Image();
+          img.onload = function() {
+            var canvas = document.createElement('canvas');
+            var maxW = 1200;
+            var w = img.width;
+            var h = img.height;
+            if (w > maxW) { h = Math.round(h * maxW / w); w = maxW; }
+            canvas.width = w;
+            canvas.height = h;
+            canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+            var dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+            resolve({ base64: dataUrl.split(',')[1], mime: 'image/jpeg' });
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function _fwResetFixitForm() {
+      fixitSelectedCause = null;
+      document.querySelectorAll('.cause-btn').forEach(function(b) { b.classList.remove('selected'); });
+      document.getElementById('fixit-desc').value = '';
+      document.getElementById('fixit-photo').value = '';
+      document.getElementById('photo-label').textContent = '📷 Tap to take photo';
+      document.getElementById('photo-label').classList.remove('has-file');
+      document.getElementById('fixit-result').innerHTML = '';
+      document.getElementById('fixit-submit').textContent = 'Submit FixIt';
+    }
+
     document.getElementById('fixit-submit').addEventListener('click', function() {
       var btn = document.getElementById('fixit-submit');
       btn.disabled = true;
       btn.textContent = 'Submitting...';
+
+      var photoFile = document.getElementById('fixit-photo').files[0];
+
+      if (_fwOffline && navigator.serviceWorker && navigator.serviceWorker.controller) {
+        _fwCompressPhoto(photoFile).then(function(photo) {
+          var entry = {
+            id: crypto.randomUUID ? crypto.randomUUID() : Date.now() + '-' + Math.random().toString(36).slice(2),
+            url: location.origin + '/api/fixit',
+            method: 'POST',
+            headers: {},
+            body: JSON.stringify({
+              cabinet_id: fixitCabinetId,
+              build_session_id: sessionId,
+              root_cause: fixitSelectedCause,
+              description: document.getElementById('fixit-desc').value
+            }),
+            timestamp: Date.now(),
+            retries: 0,
+            type: 'fixit',
+            photoBase64: photo ? photo.base64 : null,
+            photoMime: photo ? photo.mime : null
+          };
+          navigator.serviceWorker.controller.postMessage({ command: 'queue-fixit', entry: entry });
+          document.getElementById('fixit-result').innerHTML = '<div class="fixit-sent">FixIt queued offline' + (photo ? ' (with photo)' : '') + ' ✓</div>';
+          setTimeout(function() { fixitOverlay.classList.remove('active'); }, 1500);
+          _fwResetFixitForm();
+        });
+        return;
+      }
 
       var formData = new FormData();
       formData.append('cabinet_id', fixitCabinetId);
       formData.append('build_session_id', sessionId);
       formData.append('root_cause', fixitSelectedCause);
       formData.append('description', document.getElementById('fixit-desc').value);
-      var photoFile = document.getElementById('fixit-photo').files[0];
       if (photoFile) formData.append('photo', photoFile);
 
       fetch('/api/fixit', { method: 'POST', body: formData })
@@ -403,14 +466,7 @@ export function workbenchPage(config: TenantConfig, user: SessionUser): string {
           if (r.ok) {
             document.getElementById('fixit-result').innerHTML = '<div class="fixit-sent">FixIt submitted ✓</div>';
             setTimeout(function() { fixitOverlay.classList.remove('active'); }, 1500);
-            fixitSelectedCause = null;
-            document.querySelectorAll('.cause-btn').forEach(function(b) { b.classList.remove('selected'); });
-            document.getElementById('fixit-desc').value = '';
-            document.getElementById('fixit-photo').value = '';
-            document.getElementById('photo-label').textContent = '📷 Tap to take photo';
-            document.getElementById('photo-label').classList.remove('has-file');
-            document.getElementById('fixit-result').innerHTML = '';
-            btn.textContent = 'Submit FixIt';
+            _fwResetFixitForm();
           } else {
             document.getElementById('fixit-result').innerHTML = '<div style="color:var(--error)">' + (r.data.error || 'Failed') + '</div>';
             btn.disabled = false;
