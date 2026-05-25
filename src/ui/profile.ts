@@ -110,9 +110,19 @@ export function profilePage(config: TenantConfig, user: SessionUser): string {
       var stationSel = document.getElementById('field-station');
       if (p.current_station) stationSel.value = p.current_station;
 
-      if (typeof QRCode !== 'undefined' && p.email) {
-        QRCode.toCanvas(document.getElementById('qr-canvas'), p.email, { width: 160, margin: 2 });
+      function renderQR() {
+        var canvas = document.getElementById('qr-canvas');
+        if (!canvas || !p.email) return;
+        if (typeof QRCode !== 'undefined') {
+          QRCode.toCanvas(canvas, p.email, { width: 160, margin: 2 });
+        } else {
+          var s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js';
+          s.onload = function() { QRCode.toCanvas(canvas, p.email, { width: 160, margin: 2 }); };
+          document.head.appendChild(s);
+        }
       }
+      renderQR();
     });
 
     function saveProfile() {
@@ -228,5 +238,5 @@ export function profilePage(config: TenantConfig, user: SessionUser): string {
     }
 
     initNotifUI();
-  `, user, "/profile", ['https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js'], config);
+  `, user, "/profile", ['https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js'], config);
 }

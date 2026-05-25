@@ -80,7 +80,12 @@ export function cabinetDetailPage(config: TenantConfig, user: SessionUser): stri
         return;
       }
       cabData = data;
-      render(data);
+      try { render(data); } catch(e) {
+        document.getElementById('loading').innerHTML = 'Error: ' + e.message;
+        console.error('Cabinet render error:', e);
+      }
+    }).catch(function(e) {
+      document.getElementById('loading').innerHTML = 'Load failed: ' + e.message;
     });
 
     function render(data) {
@@ -153,6 +158,17 @@ export function cabinetDetailPage(config: TenantConfig, user: SessionUser): stri
       if (IS_LEAD) html += '<div style="margin-top:8px"><button class="edit-btn" onclick="openEdit(\\'metadata\\')">Edit Metadata</button></div>';
       html += '</div>';
 
+      // QR Code
+      var qrLabel = '${L3} #' + cab.cabinet_number + (cab.label ? ' — ' + escHtml(cab.label) : '');
+      var qrSub = data.job.job_number + ' ' + escHtml(data.job.job_name);
+      html += '<div class="card" style="text-align:center">';
+      html += '<h3 style="font-size:0.75rem;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:0.04em;margin-bottom:8px">Quick QR</h3>';
+      html += '<canvas id="cab-qr-canvas"></canvas>';
+      html += '<div style="font-size:0.8rem;font-weight:600;margin-top:6px">' + qrLabel + '</div>';
+      html += '<div style="font-size:0.7rem;color:var(--muted)">' + qrSub + '</div>';
+      html += '<button class="edit-btn" style="margin-top:10px" onclick="window.print()">Print</button>';
+      html += '</div>';
+
       // History
       html += '<div class="card history-section">';
       html += '<h3>History</h3><div class="timeline">';
@@ -187,6 +203,22 @@ export function cabinetDetailPage(config: TenantConfig, user: SessionUser): stri
       document.getElementById('loading').style.display = 'none';
       document.getElementById('detail').style.display = 'block';
       document.getElementById('detail').innerHTML = html;
+
+      // Render QR code (fw:build command for quick-start scanning)
+      var qrCode = 'fw:build:' + data.job.job_number + '-' + cab.cabinet_number;
+      function renderCabQR() {
+        var canvas = document.getElementById('cab-qr-canvas');
+        if (!canvas) return;
+        if (typeof QRCode !== 'undefined') {
+          QRCode.toCanvas(canvas, qrCode, { width: 160, margin: 1 });
+        } else {
+          var s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js';
+          s.onload = function() { QRCode.toCanvas(canvas, qrCode, { width: 160, margin: 1 }); };
+          document.head.appendChild(s);
+        }
+      }
+      renderCabQR();
     }
 
     function openEdit(section, group) {
@@ -327,5 +359,5 @@ export function cabinetDetailPage(config: TenantConfig, user: SessionUser): stri
     document.getElementById('edit-overlay').addEventListener('click', function(e) {
       if (e.target === this) closeEdit();
     });
-  `, user, "/cabinet", [], config);
+  `, user, "/cabinet", ['https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js'], config);
 }

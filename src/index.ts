@@ -1645,8 +1645,8 @@ app.get("/api/cabinets/:id", requireAuth(), async (c) => {
 
   const notes = await c.env.DB.prepare(
     `SELECT n.title, n.content, n.created_at, u.name as author_name
-     FROM notes n LEFT JOIN users u ON n.author_id = u.id
-     WHERE n.context_type = 'cabinet' AND n.context_id = ? ORDER BY n.created_at DESC`
+     FROM notes n LEFT JOIN users u ON n.created_by = u.id
+     WHERE n.context_type = 'cabinet' AND n.context_id = CAST(? AS TEXT) ORDER BY n.created_at DESC`
   ).bind(id).all();
 
   return c.json({
