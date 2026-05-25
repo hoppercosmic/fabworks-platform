@@ -35,7 +35,7 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
     /* Job hub mode */
     .job-hub { display: flex; flex-direction: column; gap: 14px; }
     .job-selector { display: flex; align-items: center; gap: 10px; }
-    .job-selector select { flex: 1; padding: 10px 12px; font-size: 0.9rem; font-weight: 600; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); }
+    .job-selector select { flex: 1; padding: 14px 16px; font-size: 1.2rem; font-weight: 700; border: 2px solid var(--accent); border-radius: 12px; background: var(--surface); color: var(--text); appearance: none; -webkit-appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%233b82f6'%3E%3Cpath d='M4 6l4 4 4-4'/%3E%3C/svg%3E"); background-repeat: no-repeat; background-position: right 14px center; }
     .hub-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
     @media (max-width: 600px) { .hub-grid { grid-template-columns: 1fr; } }
 
@@ -53,8 +53,11 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
     .dot-done { background: var(--success); }
     .dot-terminal { background: var(--purple); }
 
-    .bucket-row { font-size: 0.75rem; color: var(--muted); padding: 4px 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; }
-    .bucket-row:last-child { border-bottom: none; }
+    .feed-scroll-wrap { max-height: 180px; overflow: hidden; position: relative; }
+    .feed-scroll-wrap::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 30px; background: linear-gradient(transparent, var(--surface)); pointer-events: none; }
+    .feed-scroll-inner { animation: feedScroll 20s linear infinite; }
+    .feed-scroll-inner:hover { animation-play-state: paused; }
+    @keyframes feedScroll { 0% { transform: translateY(0); } 100% { transform: translateY(-50%); } }
 
     .detail-row { display: flex; justify-content: space-between; font-size: 0.8rem; padding: 4px 0; border-bottom: 1px solid var(--border); }
     .detail-row:last-child { border-bottom: none; }
@@ -185,7 +188,7 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
         '<select id="job-select" onchange="selectJob(this.value)">' +
         jobs.map(function(j) {
           return '<option value="' + j.id + '"' + (j.id === selectedJobId ? ' selected' : '') + '>' +
-            escHtml(j.job_number) + ' \\u2014 ' + escHtml(j.job_name) + '</option>';
+            escHtml(j.job_number) + ' ' + escHtml(j.job_name) + ' (' + (j.cabinet_count || 0) + ')</option>';
         }).join('') +
         '</select></div>';
 
@@ -234,13 +237,6 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
           '<div class="stats-row">' + statsHtml + '</div></div>';
 
         var bucketCard = '';
-        if (job.buckets.length > 0) {
-          bucketCard = '<div class="hub-card">' +
-            '<h4>' + LABELS.l2 + 's</h4>' +
-            job.buckets.map(function(b) {
-              return '<div class="bucket-row"><span>' + escHtml(b.name) + '</span><span class="pill pill-' + statusColor(b.status) + '">' + displayStatus(b.status) + '</span></div>';
-            }).join('') + '</div>';
-        }
 
         var detailsCard = '<div class="hub-card"><h4>Details</h4>';
         detailsCard += '<div class="detail-row"><span class="detail-label">' + LABELS.l3 + ' Count</span><span class="detail-value">' + total + '</span></div>';
@@ -283,15 +279,18 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
         }
 
         var jobScans = allScans.filter(function(s) { return s.job_number === job.job_number; });
-        var feedCard = '<div class="feed-panel"><h4>Recent Activity</h4>' +
-          (jobScans.length === 0 ? '<div style="color:var(--muted);font-size:0.78rem">No scans yet</div>' :
-          jobScans.slice(0, 8).map(function(s) {
+        var feedItems = jobScans.length === 0 ? '<div style="color:var(--muted);font-size:0.78rem;padding:12px">No activity yet</div>' :
+          jobScans.map(function(s) {
             var t = new Date(s.scanned_at + 'Z');
             return '<div class="feed-item"><span class="feed-station">' + (STATION_NAMES[s.station] || s.station) + '</span>' +
               (s.bucket_name ? ' — ' + escHtml(s.bucket_name) : '') +
               (s.cabinet_number ? ' #' + s.cabinet_number : '') +
               '<div class="feed-meta">' + escHtml(s.scanned_by || '?') + ' — ' + timeAgo(t) + '</div></div>';
-          }).join('')) + '</div>';
+          }).join('');
+        var feedCard = '<div class="feed-panel"><h4>Activity</h4>' +
+          '<div class="feed-scroll-wrap"><div class="feed-scroll-inner" id="feed-scroll">' +
+          feedItems + feedItems +
+          '</div></div></div>';
 
         var briefCard = '';
         if (brief.content) {
@@ -306,8 +305,17 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
           '<button onclick="loadJobDetail(' + jobId + ')">Refresh</button></div>';
 
         detail.innerHTML = briefCard + progressCard +
-          '<div class="hub-grid">' + bucketCard + detailsCard + linksCard + '</div>' +
-          engNotesCard + notesPanel + feedCard + refreshBar;
+          '<div class="hub-grid">' + detailsCard + linksCard + '</div>' +
+          engNotesCard + feedCard + notesPanel + refreshBar;
+
+        var scrollEl = document.getElementById('feed-scroll');
+        if (scrollEl && jobScans.length > 3) {
+          var h = scrollEl.scrollHeight / 2;
+          var dur = Math.max(10, h / 15);
+          scrollEl.style.animationDuration = dur + 's';
+        } else if (scrollEl) {
+          scrollEl.style.animation = 'none';
+        }
       });
     }
 
