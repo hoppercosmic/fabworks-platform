@@ -3,6 +3,7 @@ import { cors } from "hono/cors";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage, workbenchPage, fixitPage, myWorkbenchPage, qrPage, stationMenuPage, profilePage, stagingPage, cabinetDetailPage, reportsPage } from "./ui/index";
 import { SERVICE_WORKER_JS } from "./offline";
+import { notifyByRole, notifyUser } from "./push";
 
 // --- Types ---
 
@@ -241,7 +242,7 @@ async function checkBucketCompletion(db: D1Database, cabinetId: number, config: 
 
 // --- App ---
 
-type Bindings = { DB: D1Database; PHOTOS: R2Bucket };
+type Bindings = { DB: D1Database; PHOTOS: R2Bucket; VAPID_PUBLIC_KEY: string; VAPID_PRIVATE_KEY: string; VAPID_SUBJECT: string };
 type Variables = { config: TenantConfig; user: SessionUser | null };
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
@@ -1498,6 +1499,43 @@ app.get("/api/reports/weekly-summary", requireAuth("lead"), async (c) => {
   });
 });
 
+// --- Push Notifications ---
+
+app.get("/api/push/vapid-key", requireAuth(), (c) => {
+  return c.json({ publicKey: c.env.VAPID_PUBLIC_KEY });
+});
+
+app.post("/api/push/subscribe", requireAuth(), async (c) => {
+  const user = c.get("user")!;
+  const { endpoint, keys } = await c.req.json<{ endpoint: string; keys: { p256dh: string; auth: string } }>();
+  if (!endpoint || !keys?.p256dh || !keys?.auth) return c.json({ error: "Invalid subscription" }, 400);
+
+  await c.env.DB.prepare(
+    `INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(endpoint) DO UPDATE SET user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth`
+  ).bind(user.id, endpoint, keys.p256dh, keys.auth).run();
+
+  return c.json({ ok: true });
+});
+
+app.delete("/api/push/subscribe", requireAuth(), async (c) => {
+  const user = c.get("user")!;
+  const { endpoint } = await c.req.json<{ endpoint: string }>();
+  await c.env.DB.prepare(
+    "DELETE FROM push_subscriptions WHERE user_id = ? AND endpoint = ?"
+  ).bind(user.id, endpoint).run();
+  return c.json({ ok: true });
+});
+
+app.get("/api/push/status", requireAuth(), async (c) => {
+  const user = c.get("user")!;
+  const row = await c.env.DB.prepare(
+    "SELECT COUNT(*) as cnt FROM push_subscriptions WHERE user_id = ?"
+  ).bind(user.id).first<{ cnt: number }>();
+  return c.json({ subscribed: (row?.cnt || 0) > 0, count: row?.cnt || 0 });
+});
+
 // --- Station view ---
 
 app.get("/api/stations/:slug/items", async (c) => {
@@ -1685,6 +1723,7 @@ const FLAG_LABELS: Record<string, string> = {
 };
 
 app.post("/api/cabinets/:id/flag", requireAuth("lead"), async (c) => {
+  const user = c.get("user")!;
   const id = parseInt(c.req.param("id"), 10);
   const { flag, action } = await c.req.json<{ flag: string; action?: "add" | "remove" }>();
   if (!VALID_FLAGS.includes(flag as typeof VALID_FLAGS[number])) {
@@ -1702,6 +1741,17 @@ app.post("/api/cabinets/:id/flag", requireAuth("lead"), async (c) => {
     updated = flags.filter((f) => f !== flag);
   }
   await c.env.DB.prepare("UPDATE cabinets SET flags = ? WHERE id = ?").bind(JSON.stringify(updated), id).run();
+
+  if (op === "add") {
+    c.executionCtx.waitUntil(
+      notifyByRole(c.env.DB, c.env, ["lead", "supervisor", "admin"], {
+        title: `Flagged: ${FLAG_LABELS[flag] || flag}`,
+        body: `Cabinet #${id} flagged by ${user.name}`,
+        url: `/cabinet/${id}`,
+      }, user.id)
+    );
+  }
+
   return c.json({ ok: true, flags: updated });
 });
 
@@ -2000,6 +2050,14 @@ app.post("/api/build/:id/complete", requireAuth(), async (c) => {
     "SELECT completed_at, ROUND((julianday(completed_at) - julianday(started_at)) * 1440, 1) as total_minutes FROM build_sessions WHERE id = ?"
   ).bind(id).first<{ completed_at: string; total_minutes: number }>();
 
+  c.executionCtx.waitUntil(
+    notifyByRole(c.env.DB, c.env, ["lead", "supervisor", "admin"], {
+      title: "Build Complete",
+      body: `${user.name} finished a build (${Math.round(completed!.total_minutes)}m)`,
+      url: "/kpi",
+    }, user.id)
+  );
+
   return c.json({
     ok: true,
     completed_at: completed!.completed_at,
@@ -2136,6 +2194,14 @@ app.post("/api/fixit", requireAuth(), async (c) => {
      VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING id, created_at`
   ).bind(cab.id, cab.job_id, buildSessionId, user.id, rootCause, description, photoKey).first<{ id: number; created_at: string }>();
 
+  c.executionCtx.waitUntil(
+    notifyByRole(c.env.DB, c.env, ["lead", "supervisor", "admin"], {
+      title: "FixIt Submitted",
+      body: `${user.name} reported: ${rootCause.replace(/_/g, " ")}`,
+      url: "/fixit",
+    })
+  );
+
   return c.json({ id: result!.id, created_at: result!.created_at, photo_key: photoKey }, 201);
 });
 
@@ -2179,13 +2245,21 @@ app.post("/api/fixit/:id/resolve", requireAuth("lead"), async (c) => {
   const id = parseInt(c.req.param("id"), 10);
   const body = await c.req.json<{ resolution_note?: string }>();
 
-  const existing = await c.env.DB.prepare("SELECT id, status FROM fixit_requests WHERE id = ?").bind(id).first<{ id: number; status: string }>();
+  const existing = await c.env.DB.prepare("SELECT id, status, requested_by FROM fixit_requests WHERE id = ?").bind(id).first<{ id: number; status: string; requested_by: number }>();
   if (!existing) return c.json({ error: "FixIt request not found" }, 404);
   if (existing.status === "resolved") return c.json({ error: "Already resolved" }, 400);
 
   await c.env.DB.prepare(
     "UPDATE fixit_requests SET status = 'resolved', resolved_by = ?, resolved_at = datetime('now'), resolution_note = ? WHERE id = ?"
   ).bind(user.id, body.resolution_note || null, id).run();
+
+  c.executionCtx.waitUntil(
+    notifyUser(c.env.DB, c.env, existing.requested_by, {
+      title: "FixIt Resolved",
+      body: `Your issue was resolved by ${user.name}`,
+      url: "/fixit",
+    })
+  );
 
   return c.json({ ok: true });
 });

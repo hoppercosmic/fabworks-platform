@@ -79,6 +79,12 @@ export function profilePage(config: TenantConfig, user: SessionUser): string {
       <button class="qr-print-btn" onclick="window.print()">Print QR Badge</button>
     </div>
 
+    <div class="profile-card" id="notif-section" style="display:none;margin-top:16px">
+      <h3 style="font-size:0.9rem;font-weight:700;margin-bottom:8px">Push Notifications</h3>
+      <p style="font-size:0.78rem;color:var(--muted);margin-bottom:12px" id="notif-status"></p>
+      <button class="btn-save" id="notif-btn" onclick="toggleNotifications()" style="width:100%"></button>
+    </div>
+
     <div class="toast" id="toast"></div>
   </main>
   `, `
@@ -139,5 +145,88 @@ export function profilePage(config: TenantConfig, user: SessionUser): string {
         }
       });
     }
+    // --- Push Notifications ---
+    var _pushSub = null;
+
+    function urlBase64ToUint8Array(base64String) {
+      var padding = '='.repeat((4 - base64String.length % 4) % 4);
+      var base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+      var rawData = atob(base64);
+      var outputArray = new Uint8Array(rawData.length);
+      for (var i = 0; i < rawData.length; i++) outputArray[i] = rawData.charCodeAt(i);
+      return outputArray;
+    }
+
+    function initNotifUI() {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+      document.getElementById('notif-section').style.display = 'block';
+      navigator.serviceWorker.ready.then(function(reg) {
+        return reg.pushManager.getSubscription();
+      }).then(function(sub) {
+        _pushSub = sub;
+        updateNotifUI();
+      });
+    }
+
+    function updateNotifUI() {
+      var btn = document.getElementById('notif-btn');
+      var status = document.getElementById('notif-status');
+      if (_pushSub) {
+        btn.textContent = 'Disable Notifications';
+        btn.style.background = 'var(--danger, #e53e3e)';
+        status.textContent = 'Notifications are enabled on this device.';
+      } else {
+        btn.textContent = 'Enable Notifications';
+        btn.style.background = 'var(--accent)';
+        status.textContent = 'Get alerts for builds, FixIts, and flags.';
+      }
+    }
+
+    function toggleNotifications() {
+      if (_pushSub) {
+        var endpoint = _pushSub.endpoint;
+        _pushSub.unsubscribe().then(function() {
+          fetch('/api/push/subscribe', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ endpoint: endpoint })
+          });
+          _pushSub = null;
+          updateNotifUI();
+          showToast('Notifications disabled', 'success');
+        });
+      } else {
+        fetch('/api/push/vapid-key').then(function(r) { return r.json(); }).then(function(d) {
+          return navigator.serviceWorker.ready.then(function(reg) {
+            return reg.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: urlBase64ToUint8Array(d.publicKey)
+            });
+          });
+        }).then(function(sub) {
+          _pushSub = sub;
+          var json = sub.toJSON();
+          return fetch('/api/push/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              endpoint: json.endpoint,
+              keys: { p256dh: json.keys.p256dh, auth: json.keys.auth }
+            })
+          });
+        }).then(function() {
+          updateNotifUI();
+          showToast('Notifications enabled!', 'success');
+        }).catch(function(err) {
+          if (Notification.permission === 'denied') {
+            showToast('Notifications blocked by browser', 'error');
+          } else {
+            showToast('Could not enable notifications', 'error');
+          }
+        });
+      }
+    }
+
+    initNotifUI();
   `, user, "/profile", ['https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js'], config);
 }

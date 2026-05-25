@@ -1,7 +1,7 @@
 // Service Worker script served at /sw.js
 // and client-side offline queue JS injected into pages
 
-const SW_VERSION = "v1";
+const SW_VERSION = "v2";
 
 export const SERVICE_WORKER_JS = `
 'use strict';
@@ -263,6 +263,35 @@ self.addEventListener('message', function(e) {
       })});
     });
   }
+});
+
+self.addEventListener('push', function(e) {
+  var data = { title: 'FabWorks', body: 'New notification', icon: '/icon-192.svg', url: '/' };
+  try { if (e.data) data = Object.assign(data, e.data.json()); } catch(err) {}
+  e.waitUntil(
+    self.registration.showNotification(data.title, {
+      body: data.body,
+      icon: data.icon || '/icon-192.svg',
+      badge: '/icon-192.svg',
+      data: { url: data.url || '/' },
+      vibrate: [200, 100, 200]
+    })
+  );
+});
+
+self.addEventListener('notificationclick', function(e) {
+  e.notification.close();
+  var url = (e.notification.data && e.notification.data.url) ? e.notification.data.url : '/';
+  e.waitUntil(
+    clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(windowClients) {
+      for (var i = 0; i < windowClients.length; i++) {
+        if (windowClients[i].url.indexOf(url) !== -1) {
+          return windowClients[i].focus();
+        }
+      }
+      return clients.openWindow(url);
+    })
+  );
 });
 `;
 
