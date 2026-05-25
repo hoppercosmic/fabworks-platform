@@ -179,6 +179,8 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
       var found = jobs.find(function(j) { return j.id === selectedJobId; });
       if (!found) selectedJobId = jobs[0].id;
 
+      var weeklyHtml = IS_LEAD ? '<div id="weekly-summary"></div>' : '';
+
       var selectorHtml = '<div class="job-selector">' +
         '<select id="job-select" onchange="selectJob(this.value)">' +
         jobs.map(function(j) {
@@ -187,7 +189,8 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
         }).join('') +
         '</select></div>';
 
-      hub.innerHTML = selectorHtml + '<div id="job-detail"></div>';
+      hub.innerHTML = weeklyHtml + selectorHtml + '<div id="job-detail"></div>';
+      if (IS_LEAD) loadWeeklySummary();
       loadJobDetail(selectedJobId);
 
       if (autoTimer) clearInterval(autoTimer);
@@ -333,6 +336,21 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
     function deleteJobNote(id) {
       if (!confirm('Delete this note?')) return;
       fetch('/api/notes/' + id, { method: 'DELETE' }).then(function() { loadJobDetail(selectedJobId); });
+    }
+
+    function loadWeeklySummary() {
+      fetch('/api/reports/weekly-summary').then(function(r) { return r.json(); }).then(function(d) {
+        var el = document.getElementById('weekly-summary');
+        if (!el) return;
+        el.innerHTML = '<div class="hub-card hub-card-full" style="margin-bottom:4px">' +
+          '<h4>This Week</h4>' +
+          '<div class="stats-row" style="gap:20px">' +
+          '<div class="stat" style="flex-direction:column;align-items:center"><strong style="font-size:1.2rem;color:var(--accent)">' + d.jobs_completed + '</strong><span style="font-size:0.65rem;text-transform:uppercase">Jobs Done</span></div>' +
+          '<div class="stat" style="flex-direction:column;align-items:center"><strong style="font-size:1.2rem;color:var(--accent)">' + d.cabinets_built + '</strong><span style="font-size:0.65rem;text-transform:uppercase">' + LABELS.l3 + 's Built</span></div>' +
+          '<div class="stat" style="flex-direction:column;align-items:center"><strong style="font-size:1.2rem;color:var(--accent)">' + (d.avg_build_minutes != null ? fmtMin(d.avg_build_minutes) : '—') + '</strong><span style="font-size:0.65rem;text-transform:uppercase">Avg Build</span></div>' +
+          '<div class="stat" style="flex-direction:column;align-items:center"><strong style="font-size:1.2rem;color:' + (d.fixit_count > 0 ? 'var(--warning)' : 'var(--accent)') + '">' + d.fixit_count + '</strong><span style="font-size:0.65rem;text-transform:uppercase">FixIts</span></div>' +
+          '</div></div>';
+      }).catch(function() {});
     }
 
     loadDashboard();

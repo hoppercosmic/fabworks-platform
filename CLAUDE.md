@@ -92,18 +92,20 @@ API: `POST /api/cabinets/:id/flag` (lead+). QR codes: `fw:flag:<slug>`.
 
 ## Session Continuity
 
-**Last session:** 2026-05-24
-**Last deploy:** `43929f0e` — Cabinet detail page + properties + CSV import + clickable links
+**Last session:** 2026-05-25
+**Last deploy:** `f8d898a9` — Reports page + CSV exports + weekly summary dashboard card
 
-### What just shipped (Phase 7: Cabinet Detail + Properties)
-- `/cabinet/:id` detail page — grouped properties, status/flags, history timeline, role-gated editing
-- `GET /api/cabinets/:id` — full detail endpoint with scans, builds, fixits, notes
-- `PUT /api/cabinets/:id/properties` — merge-update properties (lead+)
-- `POST /api/jobs/:jobId/import` — CSV cut list import (creates/updates cabinets, maps columns to properties)
-- `part_properties` in TenantConfig — per-shop-type property definitions (dimensions, materials, hardware)
-- Cabinets clickable from: job detail, workbench, station view, staging, scan result
-- Migration 016: `properties` JSON column on cabinets table
-- Import UI on job detail page (lead+): file picker, preview, confirm, result summary
+### What just shipped (Phase 8: Reporting / Export)
+- `/reports` page (lead+) with 3 tabs: Job Completion, Assembler Productivity, Quality/FixIt
+- `GET /api/reports/jobs` — active jobs with completion %, status breakdown
+- `GET /api/reports/jobs/csv` — CSV download of job completion data
+- `GET /api/reports/assemblers/csv?days=N` — CSV download of assembler productivity
+- `GET /api/reports/quality` — root cause breakdown, resolution time, top problem cabinets
+- `GET /api/reports/quality/csv?days=N` — CSV download of all FixIt requests
+- `GET /api/reports/weekly-summary` — rolling 7-day stats for dashboard card
+- "This Week" summary card on dashboard (lead+ only): jobs done, cabinets built, avg build, fixits
+- "Reports" link added to Tools dropdown nav
+- `csvRow()` / `csvResponse()` utility helpers (RFC 4180 compliant)
 
 ### Known gaps in offline mode (not yet addressed)
 - FixIt photo uploads: queued as text body only — binary photo serialization to IDB not yet implemented
@@ -112,11 +114,11 @@ API: `POST /api/cabinets/:id/flag` (lead+). QR codes: `fw:flag:<slug>`.
 - No queue size limit enforced (plan says 50 items max)
 
 ### Roadmap (next up, priority order)
-1. Reporting / export — CSV, weekly summaries for ownership visibility
-2. Notifications — push alerts (build complete, FixIt submitted)
-3. Asana integration — sync job status back to project management
-4. Multi-shift support / time tracking
-5. Google Workspace integration — pull job data from sheets
+1. Notifications — push alerts (build complete, FixIt submitted)
+2. Asana integration — sync job status back to project management
+3. Multi-shift support / time tracking
+4. Google Workspace integration — pull job data from sheets
+5. Email digest — automated weekly summary to ownership
 
 ### Completed phases
 - Phase 1: Cabinet Metadata & Assembly Sheet Links
@@ -126,3 +128,4 @@ API: `POST /api/cabinets/:id/flag` (lead+). QR codes: `fw:flag:<slug>`.
 - Phase 5: UX Polish + QR Protocol (nav redesign, dead code sweep, fw: command protocol, flags, staging)
 - Phase 6: Offline Mode (service worker, queue, read cache)
 - Phase 7: Cabinet Detail Page + Properties System (detail page, per-shop-type property config, CSV import, clickable cabinets everywhere)
+- Phase 8: Reporting / Export (reports page, CSV downloads, weekly summary card)

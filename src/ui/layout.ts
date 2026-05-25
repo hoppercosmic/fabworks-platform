@@ -36,6 +36,7 @@ type NavItem = { path: string; label: string; minRole: UserRole };
 const TOOLS_NAV: NavItem[] = [
   { path: "/kpi",        label: "KPI",       minRole: "lead" },
   { path: "/takt",       label: "Takt",      minRole: "lead" },
+  { path: "/reports",    label: "Reports",   minRole: "lead" },
   { path: "/fixit",      label: "FixIt",     minRole: "lead" },
   { path: "/jobs/new",   label: "New Job",   minRole: "admin" },
   { path: "/qr",         label: "QR Codes",  minRole: "lead" },

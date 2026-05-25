@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage, workbenchPage, fixitPage, myWorkbenchPage, qrPage, stationMenuPage, profilePage, stagingPage, cabinetDetailPage } from "./ui/index";
+import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage, workbenchPage, fixitPage, myWorkbenchPage, qrPage, stationMenuPage, profilePage, stagingPage, cabinetDetailPage, reportsPage } from "./ui/index";
 import { SERVICE_WORKER_JS } from "./offline";
 
 // --- Types ---
@@ -269,6 +269,27 @@ function requireAuth(minRole: UserRole = "user") {
     }
     await next();
   };
+}
+
+function csvRow(fields: (string | number | null | undefined)[]): string {
+  return fields.map(f => {
+    if (f == null) return "";
+    const s = String(f);
+    if (s.includes(",") || s.includes('"') || s.includes("\n")) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }).join(",");
+}
+
+function csvResponse(c: any, filename: string, header: string[], rows: (string | number | null | undefined)[][]): Response {
+  const lines = [csvRow(header), ...rows.map(r => csvRow(r))];
+  return new Response(lines.join("\n"), {
+    headers: {
+      "Content-Type": "text/csv; charset=utf-8",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+    },
+  });
 }
 
 app.get("/api/health", (c) => c.json({ status: "ok", service: "fabworks" }));
@@ -1209,6 +1230,274 @@ app.get("/api/kpi/takt", requireAuth("lead"), async (c) => {
   return c.json({ stations, outliers, station_names: stationNames, days });
 });
 
+// --- Reports ---
+
+app.get("/api/reports/jobs", requireAuth("lead"), async (c) => {
+  const config = c.get("config");
+  const terminalStatus = config.l3_terminal_status;
+
+  const jobs = await c.env.DB.prepare(
+    `SELECT j.id, j.job_number, j.job_name, j.status, j.cabinet_count,
+       COUNT(c.id) as actual_cabinets,
+       COUNT(CASE WHEN c.status = ? THEN 1 END) as completed_count
+     FROM jobs j
+     LEFT JOIN cabinets c ON c.job_id = j.id
+     WHERE j.status != 'cancelled'
+     GROUP BY j.id
+     ORDER BY CASE j.status WHEN 'active' THEN 0 WHEN 'complete' THEN 1 ELSE 2 END, j.job_number`
+  ).bind(terminalStatus).all();
+
+  const statusBreakdown = await c.env.DB.prepare(
+    `SELECT j.id as job_id, c.status, COUNT(*) as count
+     FROM jobs j
+     JOIN cabinets c ON c.job_id = j.id
+     WHERE j.status != 'cancelled'
+     GROUP BY j.id, c.status`
+  ).all();
+
+  const breakdownMap: Record<number, Record<string, number>> = {};
+  for (const row of statusBreakdown.results as Array<{ job_id: number; status: string; count: number }>) {
+    if (!breakdownMap[row.job_id]) breakdownMap[row.job_id] = {};
+    breakdownMap[row.job_id][row.status] = row.count;
+  }
+
+  const result = (jobs.results as Array<Record<string, unknown>>).map(j => {
+    const total = (j.actual_cabinets as number) || (j.cabinet_count as number) || 0;
+    const completed = (j.completed_count as number) || 0;
+    const pct = total > 0 ? Math.round((completed / total) * 1000) / 10 : 0;
+    return {
+      ...j,
+      pct_complete: pct,
+      remaining: total - completed,
+      status_breakdown: breakdownMap[j.id as number] || {},
+    };
+  });
+
+  return c.json(result);
+});
+
+app.get("/api/reports/jobs/csv", requireAuth("lead"), async (c) => {
+  const config = c.get("config");
+  const terminalStatus = config.l3_terminal_status;
+
+  const jobs = await c.env.DB.prepare(
+    `SELECT j.job_number, j.job_name, j.status, j.cabinet_count,
+       COUNT(c.id) as actual_cabinets,
+       COUNT(CASE WHEN c.status = ? THEN 1 END) as completed_count
+     FROM jobs j
+     LEFT JOIN cabinets c ON c.job_id = j.id
+     WHERE j.status != 'cancelled'
+     GROUP BY j.id
+     ORDER BY j.job_number`
+  ).bind(terminalStatus).all();
+
+  const rows = (jobs.results as Array<Record<string, unknown>>).map(j => {
+    const total = (j.actual_cabinets as number) || (j.cabinet_count as number) || 0;
+    const completed = (j.completed_count as number) || 0;
+    const pct = total > 0 ? Math.round((completed / total) * 1000) / 10 : 0;
+    return [j.job_number as string, j.job_name as string, j.status as string, total, completed, pct, total - completed];
+  });
+
+  const today = new Date().toISOString().slice(0, 10);
+  return csvResponse(c, `job-completion-${today}.csv`,
+    ["Job Number", "Job Name", "Status", "Total Cabinets", "Completed", "% Complete", "Remaining"],
+    rows
+  );
+});
+
+app.get("/api/reports/assemblers/csv", requireAuth("lead"), async (c) => {
+  const config = c.get("config");
+  const days = parseInt(c.req.query("days") || "30");
+
+  const l3Stations = config.stations.filter((s) => s.level === "l3" && s.sets_status);
+  const startStation = l3Stations[0]?.slug;
+  const endStation = l3Stations[1]?.slug;
+  if (!startStation || !endStation) return csvResponse(c, "assembler-productivity.csv", ["Assembler"], []);
+
+  const result = await c.env.DB.prepare(
+    `SELECT
+       starts.scanned_by as assembler,
+       COUNT(*) as total_started,
+       COUNT(completes.id) as total_completed,
+       ROUND(AVG(CASE WHEN completes.id IS NOT NULL
+         THEN (julianday(completes.scanned_at) - julianday(starts.scanned_at)) * 1440
+         END), 1) as avg_minutes,
+       COUNT(DISTINCT DATE(starts.scanned_at)) as active_days,
+       ROUND(CAST(COUNT(completes.id) AS REAL) / MAX(COUNT(DISTINCT DATE(starts.scanned_at)), 1), 1) as per_day
+     FROM scans starts
+     LEFT JOIN scans completes
+       ON completes.cabinet_id = starts.cabinet_id
+       AND completes.station = ?
+       AND completes.scanned_at > starts.scanned_at
+     WHERE starts.station = ?
+       AND starts.scanned_by IS NOT NULL
+       AND starts.scanned_by != ''
+       AND starts.scanned_at >= datetime('now', '-' || ? || ' days')
+     GROUP BY starts.scanned_by
+     ORDER BY total_completed DESC`
+  ).bind(endStation, startStation, days).all();
+
+  const fixitData = await c.env.DB.prepare(
+    `SELECT u.name AS assembler, COUNT(*) AS total_fixits
+     FROM fixit_requests f
+     JOIN users u ON f.requested_by = u.id
+     WHERE f.created_at >= datetime('now', '-' || ? || ' days')
+     GROUP BY f.requested_by`
+  ).bind(days).all();
+
+  const fixitMap: Record<string, number> = {};
+  for (const row of fixitData.results as Array<{ assembler: string; total_fixits: number }>) {
+    fixitMap[row.assembler] = row.total_fixits;
+  }
+
+  const rows = (result.results as Array<Record<string, unknown>>).map(a => {
+    const completed = (a.total_completed as number) || 0;
+    const fixits = fixitMap[a.assembler as string] || 0;
+    const rate = completed > 0 ? Math.round((fixits / completed) * 1000) / 10 : 0;
+    return [a.assembler as string, completed, a.per_day as number, a.avg_minutes as number, fixits, rate];
+  });
+
+  const today = new Date().toISOString().slice(0, 10);
+  return csvResponse(c, `assembler-productivity-${days}d-${today}.csv`,
+    ["Assembler", "Completed", "Per Day", "Avg Cycle (min)", "FixIt Count", "Defect Rate %"],
+    rows
+  );
+});
+
+app.get("/api/reports/quality", requireAuth("lead"), async (c) => {
+  const days = parseInt(c.req.query("days") || "30");
+
+  const causeCounts = await c.env.DB.prepare(
+    `SELECT root_cause, COUNT(*) as count
+     FROM fixit_requests
+     WHERE created_at >= datetime('now', '-' || ? || ' days')
+     GROUP BY root_cause`
+  ).bind(days).all();
+
+  const resolution = await c.env.DB.prepare(
+    `SELECT ROUND(AVG(
+       (julianday(resolved_at) - julianday(created_at)) * 1440
+     ), 1) as avg_resolution_minutes,
+     COUNT(*) as resolved_count
+     FROM fixit_requests
+     WHERE status = 'resolved'
+       AND created_at >= datetime('now', '-' || ? || ' days')`
+  ).bind(days).first<{ avg_resolution_minutes: number | null; resolved_count: number }>();
+
+  const topCabinets = await c.env.DB.prepare(
+    `SELECT cab.cabinet_number, cab.label, j.job_number, COUNT(*) as issue_count
+     FROM fixit_requests f
+     JOIN cabinets cab ON f.cabinet_id = cab.id
+     JOIN jobs j ON f.job_id = j.id
+     WHERE f.created_at >= datetime('now', '-' || ? || ' days')
+     GROUP BY f.cabinet_id
+     ORDER BY issue_count DESC
+     LIMIT 10`
+  ).bind(days).all();
+
+  const totalFixits = (causeCounts.results as Array<{ count: number }>).reduce((s, r) => s + r.count, 0);
+  const causes = (causeCounts.results as Array<{ root_cause: string; count: number }>).map(r => ({
+    ...r,
+    pct: totalFixits > 0 ? Math.round((r.count / totalFixits) * 1000) / 10 : 0,
+  }));
+
+  return c.json({
+    causes,
+    total_fixits: totalFixits,
+    avg_resolution_minutes: resolution?.avg_resolution_minutes ?? null,
+    resolved_count: resolution?.resolved_count ?? 0,
+    top_cabinets: topCabinets.results,
+    days,
+  });
+});
+
+app.get("/api/reports/quality/csv", requireAuth("lead"), async (c) => {
+  const days = parseInt(c.req.query("days") || "30");
+
+  const fixits = await c.env.DB.prepare(
+    `SELECT f.id, cab.cabinet_number, cab.label, j.job_number, f.root_cause,
+       f.description, f.status, f.created_at, f.resolved_at,
+       u_req.name as requested_by_name, u_res.name as resolved_by_name,
+       CASE WHEN f.resolved_at IS NOT NULL
+         THEN ROUND((julianday(f.resolved_at) - julianday(f.created_at)) * 1440, 1)
+         ELSE NULL END as resolution_minutes
+     FROM fixit_requests f
+     JOIN cabinets cab ON f.cabinet_id = cab.id
+     JOIN jobs j ON f.job_id = j.id
+     LEFT JOIN users u_req ON f.requested_by = u_req.id
+     LEFT JOIN users u_res ON f.resolved_by = u_res.id
+     WHERE f.created_at >= datetime('now', '-' || ? || ' days')
+     ORDER BY f.created_at DESC`
+  ).bind(days).all();
+
+  const rows = (fixits.results as Array<Record<string, unknown>>).map(f => [
+    f.job_number as string,
+    f.cabinet_number as string,
+    f.label as string,
+    f.root_cause as string,
+    f.description as string,
+    f.status as string,
+    f.requested_by_name as string,
+    f.resolved_by_name as string,
+    f.created_at as string,
+    f.resolved_at as string,
+    f.resolution_minutes as number,
+  ]);
+
+  const today = new Date().toISOString().slice(0, 10);
+  return csvResponse(c, `quality-report-${days}d-${today}.csv`,
+    ["Job", "Cabinet #", "Label", "Root Cause", "Description", "Status", "Requested By", "Resolved By", "Created", "Resolved", "Resolution (min)"],
+    rows
+  );
+});
+
+app.get("/api/reports/weekly-summary", requireAuth("lead"), async (c) => {
+  const config = c.get("config");
+  const terminalStatus = config.l3_terminal_status;
+
+  const l3Stations = config.stations.filter((s) => s.level === "l3" && s.sets_status);
+  const endStation = l3Stations[1]?.slug;
+
+  const cabinetsBuilt = endStation ? await c.env.DB.prepare(
+    `SELECT COUNT(*) as count FROM scans
+     WHERE station = ? AND scanned_at >= datetime('now', '-7 days')`
+  ).bind(endStation).first<{ count: number }>() : { count: 0 };
+
+  const avgBuild = await c.env.DB.prepare(
+    `SELECT ROUND(AVG(
+       (julianday(bs.completed_at) - julianday(bs.started_at)) * 1440 - bs.total_paused_seconds / 60.0
+     ), 1) as avg_minutes,
+     COUNT(*) as count
+     FROM build_sessions bs
+     WHERE bs.completed_at IS NOT NULL
+       AND bs.started_at >= datetime('now', '-7 days')`
+  ).first<{ avg_minutes: number | null; count: number }>();
+
+  const fixitCount = await c.env.DB.prepare(
+    `SELECT COUNT(*) as count FROM fixit_requests
+     WHERE created_at >= datetime('now', '-7 days')`
+  ).first<{ count: number }>();
+
+  const jobsCompleted = await c.env.DB.prepare(
+    `SELECT COUNT(DISTINCT j.id) as count
+     FROM jobs j
+     JOIN cabinets c ON c.job_id = j.id
+     WHERE j.status = 'complete'
+       AND EXISTS (
+         SELECT 1 FROM scans s WHERE s.job_id = j.id
+         AND s.scanned_at >= datetime('now', '-7 days')
+       )`
+  ).first<{ count: number }>();
+
+  return c.json({
+    jobs_completed: jobsCompleted?.count ?? 0,
+    cabinets_built: cabinetsBuilt?.count ?? 0,
+    avg_build_minutes: avgBuild?.avg_minutes ?? null,
+    builds_count: avgBuild?.count ?? 0,
+    fixit_count: fixitCount?.count ?? 0,
+  });
+});
+
 // --- Station view ---
 
 app.get("/api/stations/:slug/items", async (c) => {
@@ -1979,6 +2268,7 @@ app.get("/job/:id/progress", requireAuth(), (c) => c.html(progressPage(c.get("co
 app.get("/qr", requireAuth("lead"), (c) => c.html(qrPage(c.get("config"), c.get("user")!)));
 app.get("/kpi", requireAuth("lead"), (c) => c.html(kpiPage(c.get("config"), c.get("user")!)));
 app.get("/takt", requireAuth("lead"), (c) => c.html(taktPage(c.get("config"), c.get("user")!)));
+app.get("/reports", requireAuth("lead"), (c) => c.html(reportsPage(c.get("config"), c.get("user")!)));
 app.get("/admin", requireAuth("admin"), (c) => c.html(adminPage(c.get("config"), c.get("user")!)));
 app.get("/workbench", requireAuth(), (c) => c.html(workbenchPage(c.get("config"), c.get("user")!)));
 app.get("/fixit", requireAuth(), (c) => c.html(fixitPage(c.get("config"), c.get("user")!)));

@@ -12,3 +12,4 @@ export { fixitPage } from "./fixit";
 export { stationMenuPage } from "./station-menu";
 export { profilePage } from "./profile";
 export { cabinetDetailPage } from "./cabinet-detail";
+export { reportsPage } from "./reports";
