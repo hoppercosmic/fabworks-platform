@@ -248,7 +248,7 @@ type Bindings = { DB: D1Database; PHOTOS: R2Bucket; VAPID_PUBLIC_KEY: string; VA
 type Variables = { config: TenantConfig; user: SessionUser | null };
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
-app.use("*", cors());
+app.use("*", cors({ origin: ["https://shop.fabworks.app"], allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], allowHeaders: ["Content-Type"], credentials: true }));
 
 app.use("*", async (c, next) => {
   const config = await loadConfig(c.env.DB);
@@ -487,7 +487,7 @@ app.get("/api/stations", (c) => {
 
 // --- Jobs ---
 
-app.post("/api/jobs", async (c) => {
+app.post("/api/jobs", requireAuth("lead"), async (c) => {
   const { job_number, job_name, cabinet_count } = await c.req.json<{
     job_number: string;
     job_name: string;
@@ -501,7 +501,7 @@ app.post("/api/jobs", async (c) => {
   return c.json(result, 201);
 });
 
-app.get("/api/jobs", async (c) => {
+app.get("/api/jobs", requireAuth(), async (c) => {
   const status = c.req.query("status") || "active";
   const result = await c.env.DB.prepare(
     "SELECT * FROM jobs WHERE status = ? ORDER BY created_at DESC"
@@ -509,7 +509,7 @@ app.get("/api/jobs", async (c) => {
   return c.json(result.results);
 });
 
-app.get("/api/jobs/:id", async (c) => {
+app.get("/api/jobs/:id", requireAuth(), async (c) => {
   const id = c.req.param("id");
   const job = await c.env.DB.prepare("SELECT * FROM jobs WHERE id = ?").bind(id).first();
   if (!job) return c.json({ error: "Job not found" }, 404);
@@ -532,7 +532,7 @@ app.get("/api/jobs/:id", async (c) => {
 
 // --- Buckets ---
 
-app.post("/api/jobs/:jobId/buckets", async (c) => {
+app.post("/api/jobs/:jobId/buckets", requireAuth("lead"), async (c) => {
   const jobId = c.req.param("jobId");
   const { name, cabinet_count } = await c.req.json<{
     name: string;
@@ -546,7 +546,7 @@ app.post("/api/jobs/:jobId/buckets", async (c) => {
   return c.json(result, 201);
 });
 
-app.get("/api/jobs/:jobId/buckets", async (c) => {
+app.get("/api/jobs/:jobId/buckets", requireAuth(), async (c) => {
   const jobId = c.req.param("jobId");
   const result = await c.env.DB.prepare(
     "SELECT * FROM buckets WHERE job_id = ? ORDER BY created_at"
@@ -556,7 +556,7 @@ app.get("/api/jobs/:jobId/buckets", async (c) => {
 
 // --- Cabinets ---
 
-app.post("/api/jobs/:jobId/cabinets", async (c) => {
+app.post("/api/jobs/:jobId/cabinets", requireAuth("lead"), async (c) => {
   const jobId = c.req.param("jobId");
   const { cabinet_number, bucket_id, label } = await c.req.json<{
     cabinet_number: number;
@@ -571,7 +571,7 @@ app.post("/api/jobs/:jobId/cabinets", async (c) => {
   return c.json(result, 201);
 });
 
-app.get("/api/jobs/:jobId/cabinets", async (c) => {
+app.get("/api/jobs/:jobId/cabinets", requireAuth(), async (c) => {
   const jobId = c.req.param("jobId");
   const result = await c.env.DB.prepare(
     "SELECT c.*, b.name as bucket_name FROM cabinets c LEFT JOIN buckets b ON c.bucket_id = b.id WHERE c.job_id = ? ORDER BY c.cabinet_number"
@@ -685,7 +685,7 @@ function parseCSVRow(line: string): string[] {
 
 // --- Scan (the core endpoint) ---
 
-app.post("/api/scan", async (c) => {
+app.post("/api/scan", requireAuth(), async (c) => {
   const config = c.get("config");
   const body = await c.req.json<{
     station: string;
@@ -789,7 +789,7 @@ app.post("/api/scan", async (c) => {
 
 // --- Recent scans feed ---
 
-app.get("/api/scans/recent", async (c) => {
+app.get("/api/scans/recent", requireAuth(), async (c) => {
   const limit = Math.min(parseInt(c.req.query("limit") || "25"), 100);
   const result = await c.env.DB.prepare(
     `SELECT s.id, s.station, s.scanned_by, s.note, s.scanned_at,
@@ -948,7 +948,7 @@ app.delete("/api/notes/:id", requireAuth(), async (c) => {
 
 // --- Assembly metrics ---
 
-app.get("/api/metrics/assembly", async (c) => {
+app.get("/api/metrics/assembly", requireAuth(), async (c) => {
   const config = c.get("config");
   const jobId = c.req.query("job_id");
 
@@ -1582,7 +1582,7 @@ app.get("/api/push/status", requireAuth(), async (c) => {
 
 // --- Station view ---
 
-app.get("/api/stations/:slug/items", async (c) => {
+app.get("/api/stations/:slug/items", requireAuth(), async (c) => {
   const config = c.get("config");
   const slug = c.req.param("slug");
   const date = c.req.query("date") || null;
@@ -1717,7 +1717,7 @@ app.put("/api/cabinets/:id/properties", requireAuth("lead"), async (c) => {
 
 // --- Staging location ---
 
-app.put("/api/cabinets/:id/location", async (c) => {
+app.put("/api/cabinets/:id/location", requireAuth(), async (c) => {
   const id = parseInt(c.req.param("id"), 10);
   const body = await c.req.json<{ location: string }>();
   const location = (body.location || "").trim() || null;
@@ -1803,7 +1803,7 @@ app.get("/api/flags", requireAuth(), (c) => {
   return c.json({ flags: VALID_FLAGS, labels: FLAG_LABELS });
 });
 
-app.get("/api/stations/:slug/staging", async (c) => {
+app.get("/api/stations/:slug/staging", requireAuth(), async (c) => {
   const config = c.get("config");
   const slug = c.req.param("slug");
   const stationDef = config.stations.find((s) => s.slug === slug);
