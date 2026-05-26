@@ -93,7 +93,7 @@ API: `POST /api/cabinets/:id/flag` (lead+). QR codes: `fw:flag:<slug>`.
 ## Session Continuity
 
 **Last session:** 2026-05-25
-**Last deploy:** `6be0f83f` — Push notifications (Phase 9)
+**Last deploy:** pending — Phase 11 (Asana Integration)
 
 ### What just shipped (Phase 9: Push Notifications)
 - Web Push API with RFC 8291 encryption (pure Web Crypto, no Node.js deps)
@@ -123,11 +123,22 @@ API: `POST /api/cabinets/:id/flag` (lead+). QR codes: `fw:flag:<slug>`.
 - On drain: reconstructs FormData with photo blob from base64
 - Queue viewer shows camera icon (has photo) or warning icon (no photo) on FixIt items
 
+### What just shipped (Phase 11: Asana Integration)
+- `src/asana.ts` — full Asana sync engine: webhook verification, REST API client, entity mappings, bidirectional sync
+- `schema/018_asana_webhooks.sql` — webhook registration + event queue tables
+- `schema/019_asana_mappings.sql` — FabWorks ↔ Asana entity mapping table
+- Inbound sync: Asana task completion → updates FabWorks bucket/cabinet status via event queue
+- Outbound sync: terminal-status scans → complete Asana task; FixIt → create REWORK task in [CNC] section
+- Webhook registration endpoint: `POST /api/asana/webhook/register` (admin)
+- Entity mapping endpoint: `POST /api/asana/mappings` (admin)
+- Combined status endpoint: `GET /api/asana/status` (admin)
+- Admin UI: Asana tab with connection status, webhook management, queue stats, entity mapping form
+- Data model: Job=Asana Project, Bucket=Task, Cabinet=Subtask
+
 ### Roadmap (next up, priority order)
-1. Asana integration — workflow routing engine + bidirectional sync (scoping in progress, [Gemini] task created)
-2. Multi-shift support / time tracking
-3. Google Workspace integration — pull job data from sheets
-4. Email digest — automated weekly summary to ownership
+1. Multi-shift support / time tracking
+2. Google Workspace integration — pull job data from sheets
+3. Email digest — automated weekly summary to ownership
 
 ### Completed phases
 - Phase 1: Cabinet Metadata & Assembly Sheet Links
@@ -140,3 +151,4 @@ API: `POST /api/cabinets/:id/flag` (lead+). QR codes: `fw:flag:<slug>`.
 - Phase 8: Reporting / Export (reports page, CSV downloads, weekly summary card)
 - Phase 9: Push Notifications (Web Push, role-based triggers, profile subscription UI)
 - Phase 10: Offline Queue Viewer + Photo Queuing (pending panel UI, retry/discard, FixIt photo compression + IDB serialization)
+- Phase 11: Asana Integration (webhook ingestion, bidirectional sync, entity mapping, admin UI)

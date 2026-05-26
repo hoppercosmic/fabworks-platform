@@ -4,6 +4,8 @@ import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage, workbenchPage, fixitPage, myWorkbenchPage, qrPage, stationMenuPage, profilePage, stagingPage, cabinetDetailPage, reportsPage, jobsManagerPage } from "./ui/index";
 import { SERVICE_WORKER_JS } from "./offline";
 import { notifyByRole, notifyUser } from "./push";
+import { verifyWebhookSignature, storeWebhook, getWebhookSecret, enqueueEvents, processEventQueue, getQueueStatus, syncScanToAsana, syncFixitToAsana, registerAsanaWebhook, getWebhookStatus, storeMapping } from "./asana";
+import type { AsanaWebhookPayload } from "./asana";
 
 // --- Types ---
 
@@ -242,7 +244,7 @@ async function checkBucketCompletion(db: D1Database, cabinetId: number, config: 
 
 // --- App ---
 
-type Bindings = { DB: D1Database; PHOTOS: R2Bucket; VAPID_PUBLIC_KEY: string; VAPID_PRIVATE_KEY: string; VAPID_SUBJECT: string };
+type Bindings = { DB: D1Database; PHOTOS: R2Bucket; VAPID_PUBLIC_KEY: string; VAPID_PRIVATE_KEY: string; VAPID_SUBJECT: string; ASANA_PAT: string };
 type Variables = { config: TenantConfig; user: SessionUser | null };
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
@@ -753,6 +755,9 @@ app.post("/api/scan", async (c) => {
 
     if (stationDef.sets_status === config.l3_terminal_status) {
       await checkBucketCompletion(c.env.DB, body.cabinet_id, config);
+      if (c.env.ASANA_PAT) {
+        c.executionCtx.waitUntil(syncScanToAsana(c.env.DB, c.env.ASANA_PAT, "cabinet", body.cabinet_id).catch(() => {}));
+      }
     }
   }
 
@@ -2268,6 +2273,15 @@ app.post("/api/fixit", requireAuth(), async (c) => {
     })
   );
 
+  if (c.env.ASANA_PAT) {
+    c.executionCtx.waitUntil((async () => {
+      const cabLabel = await c.env.DB.prepare("SELECT label FROM cabinets WHERE id = ?").bind(cabinetId).first<{ label: string }>();
+      if (cabLabel) {
+        await syncFixitToAsana(c.env.DB, c.env.ASANA_PAT, cab.job_id, cabLabel.label || `Cabinet ${cabinetId}`, rootCause, description || "");
+      }
+    })().catch(() => {}));
+  }
+
   return c.json({ id: result!.id, created_at: result!.created_at, photo_key: photoKey }, 201);
 });
 
@@ -2373,6 +2387,74 @@ const PWA_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <rect x="120" y="340" width="272" height="6" rx="3" fill="#334155"/>
   <rect x="120" y="340" width="180" height="6" rx="3" fill="#3b82f6"/>
 </svg>`;
+
+// --- Asana Webhook Ingestion ---
+
+app.post("/api/asana/webhook", async (c) => {
+  const db = c.env.DB;
+  const hookSecret = c.req.header("X-Hook-Secret");
+  if (hookSecret) {
+    await storeWebhook(db, "default", "default", hookSecret);
+    return c.body(null, 200, { "X-Hook-Secret": hookSecret });
+  }
+
+  const signature = c.req.header("X-Hook-Signature");
+  if (!signature) return c.text("Missing signature", 401);
+
+  const secret = await getWebhookSecret(db);
+  if (!secret) return c.text("No webhook registered", 500);
+
+  const body = await c.req.text();
+  const valid = await verifyWebhookSignature(body, signature, secret);
+  if (!valid) return c.text("Invalid signature", 401);
+
+  const payload: AsanaWebhookPayload = JSON.parse(body);
+  if (payload.events && payload.events.length > 0) {
+    c.executionCtx.waitUntil(enqueueEvents(db, "default", payload.events));
+  }
+  return c.body(null, 200);
+});
+
+app.post("/api/asana/webhook/process", requireAuth("admin"), async (c) => {
+  const result = await processEventQueue(c.env.DB);
+  return c.json(result);
+});
+
+app.get("/api/asana/webhook/status", requireAuth("admin"), async (c) => {
+  const status = await getQueueStatus(c.env.DB);
+  return c.json(status);
+});
+
+app.get("/api/asana/status", requireAuth("admin"), async (c) => {
+  const [queue, webhooks] = await Promise.all([
+    getQueueStatus(c.env.DB),
+    getWebhookStatus(c.env.DB),
+  ]);
+  return c.json({ ...queue, ...webhooks, has_pat: !!c.env.ASANA_PAT });
+});
+
+app.post("/api/asana/webhook/register", requireAuth("admin"), async (c) => {
+  const pat = c.env.ASANA_PAT;
+  if (!pat) return c.json({ error: "ASANA_PAT not configured" }, 500);
+
+  const { project_gid } = await c.req.json<{ project_gid: string }>();
+  if (!project_gid) return c.json({ error: "project_gid required" }, 400);
+
+  const targetUrl = new URL("/api/asana/webhook", c.req.url).toString().replace("http://", "https://");
+  const webhook = await registerAsanaWebhook(pat, project_gid, targetUrl);
+  return c.json({ webhook_gid: webhook.gid, target: targetUrl });
+});
+
+app.post("/api/asana/mappings", requireAuth("admin"), async (c) => {
+  const { fw_type, fw_id, asana_gid, asana_type } = await c.req.json<{
+    fw_type: string; fw_id: number; asana_gid: string; asana_type: string;
+  }>();
+  if (!fw_type || !fw_id || !asana_gid || !asana_type) {
+    return c.json({ error: "fw_type, fw_id, asana_gid, asana_type required" }, 400);
+  }
+  await storeMapping(c.env.DB, fw_type, fw_id, asana_gid, asana_type);
+  return c.json({ ok: true });
+});
 
 app.get("/manifest.json", (c) => {
   return c.body(PWA_MANIFEST, 200, { "Content-Type": "application/manifest+json" });

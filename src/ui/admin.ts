@@ -68,6 +68,7 @@ export function adminPage(config: TenantConfig, user: SessionUser): string {
     <div class="tabs">
       <div class="tab active" data-tab="users">Users</div>
       <div class="tab" data-tab="config">Config</div>
+      <div class="tab" data-tab="asana">Asana</div>
     </div>
 
     <!-- Users Tab -->
@@ -142,6 +143,51 @@ export function adminPage(config: TenantConfig, user: SessionUser): string {
             <button class="btn btn-sm" id="reset-btn" style="background:var(--error);color:white">Reset Config</button>
           </div>
           <div class="msg" id="reset-msg"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Asana Tab -->
+    <div class="tab-panel" id="panel-asana">
+      <div class="card">
+        <label>Connection</label>
+        <div id="asana-connection" style="margin-top:8px;font-size:0.9rem;color:var(--muted)">Loading...</div>
+      </div>
+      <div class="card" style="margin-top:12px">
+        <label>Webhooks</label>
+        <div id="asana-webhooks" style="margin-top:8px;font-size:0.85rem;color:var(--muted)">Loading...</div>
+        <div style="margin-top:12px">
+          <label style="font-size:0.75rem">Register Webhook for Asana Project</label>
+          <div style="display:flex;gap:8px;margin-top:6px">
+            <input type="text" id="asana-project-gid" placeholder="Asana Project GID" style="flex:1;padding:10px;font-size:0.9rem">
+            <button class="btn btn-sm" id="register-webhook-btn" style="background:var(--accent);color:white;white-space:nowrap">Register</button>
+          </div>
+          <div class="msg" id="webhook-msg"></div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:12px">
+        <label>Event Queue</label>
+        <div id="asana-queue" style="margin-top:8px;font-size:0.85rem;color:var(--muted)">Loading...</div>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-sm" id="process-queue-btn" style="background:var(--accent);color:white">Process Queue</button>
+        </div>
+        <div class="msg" id="queue-msg"></div>
+      </div>
+      <div class="card" style="margin-top:12px">
+        <label>Entity Mappings</label>
+        <div style="margin-top:8px">
+          <label style="font-size:0.75rem">Link FabWorks Entity to Asana</label>
+          <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
+            <select id="map-fw-type" style="padding:8px;font-size:0.85rem">
+              <option value="job">Job</option>
+              <option value="bucket">Bucket</option>
+              <option value="cabinet">Cabinet</option>
+            </select>
+            <input type="number" id="map-fw-id" placeholder="FW ID" style="width:80px;padding:8px;font-size:0.85rem">
+            <input type="text" id="map-asana-gid" placeholder="Asana GID" style="flex:1;padding:8px;font-size:0.85rem">
+            <button class="btn btn-sm" id="save-mapping-btn" style="background:var(--accent);color:white">Link</button>
+          </div>
+          <div class="msg" id="mapping-msg"></div>
         </div>
       </div>
     </div>
@@ -391,6 +437,107 @@ export function adminPage(config: TenantConfig, user: SessionUser): string {
     });
 
     loadConfig();
+
+    // --- Asana ---
+    function loadAsanaStatus() {
+      fetch('/api/asana/status').then(function(r) { return r.json(); }).then(function(d) {
+        var conn = document.getElementById('asana-connection');
+        conn.innerHTML = d.has_pat
+          ? '<span style="color:var(--success)">&#x2713; ASANA_PAT configured</span>'
+          : '<span style="color:var(--error)">&#x2717; ASANA_PAT not set</span>';
+
+        var wh = document.getElementById('asana-webhooks');
+        if (d.webhooks && d.webhooks.length > 0) {
+          wh.innerHTML = d.webhooks.map(function(w) {
+            var status = w.active ? '<span style="color:var(--success)">active</span>' : '<span style="color:var(--muted)">inactive</span>';
+            return '<div style="padding:6px 0;border-bottom:1px solid var(--border)">' +
+              '<div>Resource: <strong>' + escHtml(w.resource_gid) + '</strong> ' + status + '</div>' +
+              '<div style="font-size:0.75rem;color:var(--muted)">' + w.created_at + '</div></div>';
+          }).join('');
+        } else {
+          wh.textContent = 'No webhooks registered';
+        }
+
+        var q = document.getElementById('asana-queue');
+        q.innerHTML = '<div style="display:flex;gap:16px">' +
+          '<span>Pending: <strong>' + d.pending + '</strong></span>' +
+          '<span>Processed: <strong>' + d.processed + '</strong></span>' +
+          '<span>Failed: <strong style="color:' + (d.failed > 0 ? 'var(--error)' : 'inherit') + '">' + d.failed + '</strong></span>' +
+          '</div>';
+      }).catch(function() {
+        document.getElementById('asana-connection').textContent = 'Failed to load status';
+      });
+    }
+
+    document.getElementById('register-webhook-btn').addEventListener('click', function() {
+      var gid = document.getElementById('asana-project-gid').value.trim();
+      var msgDiv = document.getElementById('webhook-msg');
+      msgDiv.className = 'msg';
+      if (!gid) { msgDiv.className = 'msg error'; msgDiv.textContent = 'Enter a project GID'; return; }
+
+      fetch('/api/asana/webhook/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ project_gid: gid }),
+      }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+      .then(function(r) {
+        if (r.ok) {
+          msgDiv.className = 'msg success';
+          msgDiv.textContent = 'Webhook registered: ' + r.data.webhook_gid;
+          loadAsanaStatus();
+        } else {
+          msgDiv.className = 'msg error';
+          msgDiv.textContent = r.data.error || 'Registration failed';
+        }
+      });
+    });
+
+    document.getElementById('process-queue-btn').addEventListener('click', function() {
+      var msgDiv = document.getElementById('queue-msg');
+      msgDiv.className = 'msg';
+
+      fetch('/api/asana/webhook/process', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          msgDiv.className = 'msg success';
+          msgDiv.textContent = 'Processed: ' + d.processed + ', Failed: ' + d.failed;
+          loadAsanaStatus();
+        })
+        .catch(function() {
+          msgDiv.className = 'msg error';
+          msgDiv.textContent = 'Processing failed';
+        });
+    });
+
+    document.getElementById('save-mapping-btn').addEventListener('click', function() {
+      var fwType = document.getElementById('map-fw-type').value;
+      var fwId = parseInt(document.getElementById('map-fw-id').value, 10);
+      var asanaGid = document.getElementById('map-asana-gid').value.trim();
+      var msgDiv = document.getElementById('mapping-msg');
+      msgDiv.className = 'msg';
+
+      if (!fwId || !asanaGid) { msgDiv.className = 'msg error'; msgDiv.textContent = 'ID and GID required'; return; }
+
+      var asanaType = fwType === 'job' ? 'project' : fwType === 'bucket' ? 'task' : 'subtask';
+      fetch('/api/asana/mappings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fw_type: fwType, fw_id: fwId, asana_gid: asanaGid, asana_type: asanaType }),
+      }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+      .then(function(r) {
+        if (r.ok) {
+          msgDiv.className = 'msg success';
+          msgDiv.textContent = fwType + ' #' + fwId + ' linked to ' + asanaGid;
+          document.getElementById('map-fw-id').value = '';
+          document.getElementById('map-asana-gid').value = '';
+        } else {
+          msgDiv.className = 'msg error';
+          msgDiv.textContent = r.data.error || 'Failed to save';
+        }
+      });
+    });
+
+    loadAsanaStatus();
   `, user, "/admin", [], config);
 }
 
