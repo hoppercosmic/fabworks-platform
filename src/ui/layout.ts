@@ -291,6 +291,24 @@ export const SHARED_STYLES = `
     }
     #qr-reader { width: 100%; max-width: 400px; }
     .scanner-status { color: var(--muted); font-size: 0.85rem; margin-top: 12px; }
+    .fw-toast { position:fixed; bottom:80px; left:50%; transform:translateX(-50%); background:var(--surface); color:var(--text); padding:10px 20px; border-radius:8px; font-size:0.85rem; font-weight:600; z-index:300; opacity:0; transition:opacity 0.3s; pointer-events:none; border:1px solid var(--border); max-width:90vw; text-align:center; }
+    .fw-toast.show { opacity:1; }
+    .fw-toast-success { background:#16a34a; border-color:#16a34a; }
+    .fw-toast-error { background:#dc2626; border-color:#dc2626; }
+    .fw-modal { display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:200; align-items:center; justify-content:center; padding:16px; }
+    .fw-modal.open { display:flex; }
+    .fw-modal-panel { background:var(--surface); border-radius:12px; padding:20px; width:100%; max-width:400px; }
+    .fw-modal-panel h3 { font-size:0.9rem; margin-bottom:12px; color:var(--text); }
+    .fw-modal-panel textarea { width:100%; padding:10px; font-size:0.9rem; background:var(--bg); border:1px solid var(--border); border-radius:6px; color:var(--text); resize:vertical; box-sizing:border-box; font-family:inherit; }
+    .fw-modal-actions { display:flex; gap:8px; margin-top:12px; }
+    .fw-modal-actions button { flex:1; padding:10px; font-size:0.85rem; font-weight:600; border:none; border-radius:8px; cursor:pointer; }
+    .fw-modal-save { background:var(--accent); color:white; }
+    .fw-modal-cancel { background:var(--bg); color:var(--text); border:1px solid var(--border) !important; }
+    .fw-status-row { font-size:0.8rem; padding:6px 0; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+    .fw-status-row:last-child { border-bottom:none; }
+    .fw-status-label { font-weight:600; font-size:0.8rem; margin-bottom:4px; color:var(--muted); }
+    .fw-status-value { font-size:0.9rem; margin-bottom:12px; }
+    .fw-flag-badge { display:inline-block; padding:2px 8px; border-radius:4px; font-size:0.7rem; font-weight:600; background:var(--warning); color:#000; margin-right:4px; }
 `;
 
 // ─── Page Layout ─────────────────────────────────────────
@@ -467,6 +485,82 @@ const USER_MENU_JS = `
 
       window._fabworksStopScanner = stopGlobalScanner;
 
+      function showGlobalToast(msg, type) {
+        var t = document.getElementById('fw-global-toast');
+        if (!t) {
+          t = document.createElement('div');
+          t.id = 'fw-global-toast';
+          t.className = 'fw-toast';
+          document.body.appendChild(t);
+        }
+        t.textContent = msg;
+        t.className = 'fw-toast' + (type ? ' fw-toast-' + type : '');
+        t.classList.add('show');
+        clearTimeout(t._timer);
+        t._timer = setTimeout(function() { t.classList.remove('show'); }, 3000);
+      }
+
+      function resolveJobCab(jobCabStr, callback) {
+        var bp = jobCabStr.split('-');
+        var jobNum = bp[0];
+        var cabNum = bp.length > 1 ? bp[1] : null;
+        fetch('/api/jobs?status=active')
+          .then(function(r) { return r.json(); })
+          .then(function(jobs) {
+            var job = jobs.find(function(j) { return j.job_number === jobNum; });
+            if (!job) { showGlobalToast('Job ' + jobNum + ' not found', 'error'); return; }
+            return fetch('/api/jobs/' + job.id).then(function(r) { return r.json(); });
+          })
+          .then(function(detail) {
+            if (!detail || detail.error) return;
+            var cab = cabNum
+              ? detail.cabinets.find(function(c) { return String(c.cabinet_number) === cabNum; })
+              : detail.cabinets[0];
+            if (!cab) { showGlobalToast('Cabinet not found in job ' + jobNum, 'error'); return; }
+            callback(detail, cab);
+          });
+      }
+
+      // --- Note modal wiring ---
+      var noteModal = document.getElementById('fw-note-modal');
+      var noteInput = document.getElementById('fw-note-input');
+      var noteTitle = document.getElementById('fw-note-title');
+      var notePendingCabId = null;
+      if (noteModal) {
+        document.getElementById('fw-note-cancel').addEventListener('click', function() {
+          noteModal.classList.remove('open');
+          noteInput.value = '';
+          notePendingCabId = null;
+        });
+        document.getElementById('fw-note-save').addEventListener('click', function() {
+          var content = noteInput.value.trim();
+          if (!content || !notePendingCabId) return;
+          fetch('/api/notes', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ context_type: 'cabinet', context_id: String(notePendingCabId), content: content })
+          }).then(function(r) {
+            if (r.ok) {
+              noteModal.classList.remove('open');
+              noteInput.value = '';
+              notePendingCabId = null;
+              showGlobalToast('Note saved', 'success');
+            } else {
+              showGlobalToast('Failed to save note', 'error');
+            }
+          }).catch(function() {
+            showGlobalToast('Failed to save note', 'error');
+          });
+        });
+        noteModal.addEventListener('click', function(e) { if (e.target === noteModal) { noteModal.classList.remove('open'); noteInput.value = ''; notePendingCabId = null; } });
+      }
+
+      // --- Status modal wiring ---
+      var statusModal = document.getElementById('fw-status-modal');
+      if (statusModal) {
+        statusModal.addEventListener('click', function(e) { if (e.target === statusModal) statusModal.classList.remove('open'); });
+      }
+
       function onGlobalQR(text) {
         stopGlobalScanner();
         if (!text || !text.startsWith('fw:')) {
@@ -479,35 +573,92 @@ const USER_MENU_JS = `
         var action = parts[1];
 
         if (action === 'build' && parts[2]) {
-          var bp = parts[2].split('-');
-          var jobNum = bp[0];
-          var cabNum = bp.length > 1 ? bp[1] : null;
-          fetch('/api/jobs?status=active')
-            .then(function(r) { return r.json(); })
-            .then(function(jobs) {
-              var job = jobs.find(function(j) { return j.job_number === jobNum; });
-              if (!job) { alert('Job ' + jobNum + ' not found'); return; }
-              return fetch('/api/jobs/' + job.id).then(function(r) { return r.json(); });
-            })
-            .then(function(detail) {
-              if (!detail || detail.error) return;
-              var cab = cabNum
-                ? detail.cabinets.find(function(c) { return String(c.cabinet_number) === cabNum; })
-                : detail.cabinets[0];
-              if (!cab) { alert('Cabinet not found in job ' + jobNum); return; }
-              fetch('/api/build/start', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ cabinet_id: cab.id })
-              }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
-              .then(function(r) {
-                if (r.ok || r.data.active_session_id) {
-                  window.location.href = '/workbench';
-                } else {
-                  alert(r.data.error || 'Failed to start build');
-                }
-              });
+          resolveJobCab(parts[2], function(detail, cab) {
+            fetch('/api/build/start', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ cabinet_id: cab.id })
+            }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+            .then(function(r) {
+              if (r.ok || r.data.active_session_id) {
+                window.location.href = '/workbench';
+              } else {
+                showGlobalToast(r.data.error || 'Failed to start build', 'error');
+              }
             });
+          });
+          return;
+        }
+
+        if (action === 'info' && parts[2]) {
+          resolveJobCab(parts[2], function(detail, cab) {
+            window.location.href = '/cabinet/' + cab.id;
+          });
+          return;
+        }
+
+        if (action === 'scan' && parts[2]) {
+          var stationSlug = parts[3];
+          if (!stationSlug) { showGlobalToast('Missing station in scan code', 'error'); return; }
+          resolveJobCab(parts[2], function(detail, cab) {
+            fetch('/api/scan', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ station: stationSlug, job_id: detail.id, cabinet_id: cab.id })
+            }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+            .then(function(r) {
+              if (r.ok) {
+                showGlobalToast('Scanned #' + cab.cabinet_number + ' at ' + (r.data.station_name || stationSlug), 'success');
+              } else {
+                showGlobalToast(r.data.error || 'Scan failed', 'error');
+              }
+            });
+          });
+          return;
+        }
+
+        if (action === 'note' && parts[2]) {
+          resolveJobCab(parts[2], function(detail, cab) {
+            var label = cab.label || ('#' + cab.cabinet_number);
+            noteTitle.textContent = 'Note for ' + label + ' (' + detail.job_number + ')';
+            notePendingCabId = cab.id;
+            noteInput.value = '';
+            noteModal.classList.add('open');
+            setTimeout(function() { noteInput.focus(); }, 100);
+          });
+          return;
+        }
+
+        if (action === 'status' && parts[2]) {
+          resolveJobCab(parts[2], function(detail, cab) {
+            fetch('/api/cabinets/' + cab.id)
+              .then(function(r) { return r.json(); })
+              .then(function(data) {
+                var label = data.cabinet.label || ('#' + data.cabinet.cabinet_number);
+                document.getElementById('fw-status-title').textContent = label + ' — ' + detail.job_number;
+                var flags = [];
+                try { flags = JSON.parse(data.cabinet.flags || '[]'); } catch(e) {}
+                var flagHtml = flags.length
+                  ? flags.map(function(f) { return '<span class="fw-flag-badge">' + escHtml(f) + '</span>'; }).join(' ')
+                  : '<span style="color:var(--muted)">None</span>';
+                var statusText = data.cabinet.status ? data.cabinet.status.replace(/_/g, ' ') : 'pending';
+                statusText = statusText.charAt(0).toUpperCase() + statusText.slice(1);
+                var scansHtml = '';
+                var scans = data.scans || [];
+                if (scans.length) {
+                  scansHtml = scans.slice(0, 5).map(function(s) {
+                    return '<div class="fw-status-row"><span>' + escHtml(s.station || '') + (s.scanned_by ? ' — ' + escHtml(s.scanned_by) : '') + '</span><span style="color:var(--muted);font-size:0.7rem">' + timeAgo(new Date(s.scanned_at + 'Z')) + '</span></div>';
+                  }).join('');
+                } else {
+                  scansHtml = '<div style="color:var(--muted);font-size:0.8rem;padding:6px 0">No scans yet</div>';
+                }
+                document.getElementById('fw-status-body').innerHTML =
+                  '<div class="fw-status-label">Status</div><div class="fw-status-value">' + escHtml(statusText) + '</div>' +
+                  '<div class="fw-status-label">Flags</div><div class="fw-status-value">' + flagHtml + '</div>' +
+                  '<div class="fw-status-label">Recent Scans</div>' + scansHtml;
+                statusModal.classList.add('open');
+              });
+          });
           return;
         }
 
@@ -562,6 +713,22 @@ export function page(title: string, extraStyles: string, body: string, script: s
     <div style="font-size:1.4rem;font-weight:700;color:#111;margin-top:16px" id="fab-spot-title"></div>
     <div style="font-size:0.9rem;color:#666;margin-top:4px" id="fab-spot-sub"></div>
     <div style="font-size:0.75rem;color:#999;margin-top:24px">Tap anywhere to close</div>
+  </div>
+  <div class="fw-modal" id="fw-note-modal">
+    <div class="fw-modal-panel">
+      <h3 id="fw-note-title">Add Note</h3>
+      <textarea id="fw-note-input" placeholder="Type your note..." rows="4"></textarea>
+      <div class="fw-modal-actions">
+        <button class="fw-modal-cancel" id="fw-note-cancel">Cancel</button>
+        <button class="fw-modal-save" id="fw-note-save">Save</button>
+      </div>
+    </div>
+  </div>
+  <div class="fw-modal" id="fw-status-modal">
+    <div class="fw-modal-panel">
+      <h3 id="fw-status-title">Cabinet Status</h3>
+      <div id="fw-status-body"></div>
+    </div>
   </div>` : "";
   const navHtml = user ? renderTopBar(currentPath, user, config) : `<div style="padding:0"></div>`;
   const bodyPadding = user ? '' : 'body{padding-top:0;}';

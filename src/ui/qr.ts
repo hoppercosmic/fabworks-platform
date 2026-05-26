@@ -224,6 +224,52 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
           html += '<div class="qr-sub" style="color:var(--success)">Scan → Start Timer</div></div>';
         });
         html += '</div>';
+
+        html += '<div class="qr-section">Info QRs</div><div class="qr-grid">';
+        job.cabinets.forEach(function(c) {
+          var infoCode = 'fw:info:' + job.job_number + '-' + c.cabinet_number;
+          var label = c.label || (LABELS.l3 + ' ' + c.cabinet_number);
+          html += '<div class="qr-card" style="border-left:3px solid var(--accent)" data-code="' + infoCode + '" data-title="Info ' + escHtml(label) + '" data-sub="Scan to view details">';
+          html += '<img id="qr-info-' + c.id + '" width="220" height="220" alt="QR" />';
+          html += '<div class="qr-title">Info #' + c.cabinet_number + '</div>';
+          html += '<div class="qr-sub" style="color:var(--accent)">Scan → View Details</div></div>';
+        });
+        html += '</div>';
+
+        html += '<div class="qr-section">Note QRs</div><div class="qr-grid">';
+        job.cabinets.forEach(function(c) {
+          var noteCode = 'fw:note:' + job.job_number + '-' + c.cabinet_number;
+          var label = c.label || (LABELS.l3 + ' ' + c.cabinet_number);
+          html += '<div class="qr-card" style="border-left:3px solid var(--warning)" data-code="' + noteCode + '" data-title="Note ' + escHtml(label) + '" data-sub="Scan to add note">';
+          html += '<img id="qr-note-' + c.id + '" width="220" height="220" alt="QR" />';
+          html += '<div class="qr-title">Note #' + c.cabinet_number + '</div>';
+          html += '<div class="qr-sub" style="color:var(--warning)">Scan → Add Note</div></div>';
+        });
+        html += '</div>';
+
+        html += '<div class="qr-section">Status QRs</div><div class="qr-grid">';
+        job.cabinets.forEach(function(c) {
+          var statusCode = 'fw:status:' + job.job_number + '-' + c.cabinet_number;
+          var label = c.label || (LABELS.l3 + ' ' + c.cabinet_number);
+          html += '<div class="qr-card" style="border-left:3px solid var(--muted)" data-code="' + statusCode + '" data-title="Status ' + escHtml(label) + '" data-sub="Scan to check status">';
+          html += '<img id="qr-status-' + c.id + '" width="220" height="220" alt="QR" />';
+          html += '<div class="qr-title">Status #' + c.cabinet_number + '</div>';
+          html += '<div class="qr-sub" style="color:var(--muted)">Scan → Check Status</div></div>';
+        });
+        html += '</div>';
+
+        var l3Stations = STATIONS.filter(function(s) { return s.level === 'l3'; });
+        if (l3Stations.length) {
+          html += '<div class="qr-section">One-Shot Scan QRs</div>';
+          html += '<div style="margin:4px 0 8px;font-size:0.75rem;color:var(--muted)">Print on traveler sheets. Scan at any station to log instantly.</div>';
+          html += '<select id="scan-station-filter" style="margin-bottom:12px;padding:8px 12px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:0.85rem;width:100%">';
+          html += '<option value="">Select a station...</option>';
+          l3Stations.forEach(function(s) {
+            html += '<option value="' + s.slug + '">' + escHtml(s.name) + '</option>';
+          });
+          html += '</select>';
+          html += '<div id="scan-qr-grid" class="qr-grid"></div>';
+        }
       }
 
       jobContent.innerHTML = html;
@@ -240,6 +286,18 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
           var el = document.getElementById('qr-build-' + c.id);
           if (el) el.src = u;
         });
+        QRCode.toDataURL('fw:info:' + job.job_number + '-' + c.cabinet_number, { width: 220, margin: 1 }, function(e, u) {
+          var el = document.getElementById('qr-info-' + c.id);
+          if (el) el.src = u;
+        });
+        QRCode.toDataURL('fw:note:' + job.job_number + '-' + c.cabinet_number, { width: 220, margin: 1 }, function(e, u) {
+          var el = document.getElementById('qr-note-' + c.id);
+          if (el) el.src = u;
+        });
+        QRCode.toDataURL('fw:status:' + job.job_number + '-' + c.cabinet_number, { width: 220, margin: 1 }, function(e, u) {
+          var el = document.getElementById('qr-status-' + c.id);
+          if (el) el.src = u;
+        });
       });
 
       // Click-to-spotlight
@@ -248,6 +306,44 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
           showSpotlight(card.dataset.code, card.dataset.title, card.dataset.sub);
         });
       });
+
+      // One-shot scan station filter
+      var scanFilter = document.getElementById('scan-station-filter');
+      var scanGrid = document.getElementById('scan-qr-grid');
+      if (scanFilter && scanGrid) {
+        scanFilter.addEventListener('change', function() {
+          var slug = scanFilter.value;
+          scanGrid.innerHTML = '';
+          if (!slug) return;
+          var sta = STATIONS.find(function(s) { return s.slug === slug; });
+          var staName = sta ? sta.name : slug;
+          job.cabinets.forEach(function(c) {
+            var scanCode = 'fw:scan:' + job.job_number + '-' + c.cabinet_number + ':' + slug;
+            var label = c.label || (LABELS.l3 + ' ' + c.cabinet_number);
+            var card = document.createElement('div');
+            card.className = 'qr-card';
+            card.style.borderLeft = '3px solid var(--purple)';
+            card.dataset.code = scanCode;
+            card.dataset.title = '#' + c.cabinet_number + ' → ' + staName;
+            card.dataset.sub = 'One-shot scan';
+            var imgEl = document.createElement('img');
+            imgEl.width = 220; imgEl.height = 220; imgEl.alt = 'QR';
+            card.appendChild(imgEl);
+            var t = document.createElement('div');
+            t.className = 'qr-title';
+            t.textContent = '#' + c.cabinet_number + ' → ' + staName;
+            card.appendChild(t);
+            var sub = document.createElement('div');
+            sub.className = 'qr-sub';
+            sub.style.color = 'var(--purple)';
+            sub.textContent = 'Scan → Log Instantly';
+            card.appendChild(sub);
+            card.addEventListener('click', function() { showSpotlight(card.dataset.code, card.dataset.title, card.dataset.sub); });
+            scanGrid.appendChild(card);
+            QRCode.toDataURL(scanCode, { width: 220, margin: 1 }, function(e, u) { imgEl.src = u; });
+          });
+        });
+      }
     }
 
     // --- System tab ---
