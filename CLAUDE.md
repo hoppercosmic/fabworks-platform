@@ -93,7 +93,7 @@ API: `POST /api/cabinets/:id/flag` (lead+). QR codes: `fw:flag:<slug>`.
 ## Session Continuity
 
 **Last session:** 2026-05-25
-**Last deploy:** pending — Phase 11 (Asana Integration)
+**Last deploy:** `7f514ef` — Phase 11 (Asana Integration) + build-complete status fix
 
 ### What just shipped (Phase 9: Push Notifications)
 - Web Push API with RFC 8291 encryption (pure Web Crypto, no Node.js deps)
