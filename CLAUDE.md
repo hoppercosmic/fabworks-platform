@@ -42,7 +42,7 @@ UI pages in `src/ui/`:
 - **Dynamic CSS classes** — `pillColor()` returns color names, classes constructed as `'pill-' + pillColor(status)`. Don't delete pill CSS thinking it's unused.
 - **`displayStatusJS(config)`** — injects a `displayStatus()` function that maps status slugs to human labels based on tenant config.
 - **Role system:** `user < lead < supervisor < admin`. `ROLE_LEVELS` maps to numbers. `requireAuth(minRole)` middleware gates routes.
-- **QR protocol:** `fw:<action>:<target>` — global router in `layout.ts` handles `build`, `menu`, `cmd`. Page-specific handlers via `window._fabworksHandleQR`.
+- **QR protocol:** `fw:<action>:<target>` — global router in `layout.ts` handles `build`, `info`, `scan`, `note`, `status`, `menu`, `cmd`. Page-specific handlers via `window._fabworksHandleQR`. Shared `resolveJobCab()` helper for `<job_number>-<cabinet_number>` resolution.
 - **Tenant config:** Shop type templates (cabinet_shop, metal_fab, woodworking) define stations, entity labels (l1=Job, l2=Bucket, l3=Cabinet), and status flow.
 
 ## Data Model
@@ -93,7 +93,15 @@ API: `POST /api/cabinets/:id/flag` (lead+). QR codes: `fw:flag:<slug>`.
 ## Session Continuity
 
 **Last session:** 2026-05-25
-**Last deploy:** `7f514ef` — Phase 11 (Asana Integration) + build-complete status fix
+**Last deploy:** `90b623f` — QR command extensions (fw:info, fw:scan, fw:note, fw:status)
+
+### What just shipped (QR Command Extensions)
+- 4 new global QR commands: `fw:info`, `fw:scan`, `fw:note`, `fw:status`
+- `resolveJobCab()` helper extracted from `fw:build` — shared by all `<job>-<cab>` commands
+- Global toast system (`showGlobalToast`) for command feedback
+- Note modal + status modal HTML/CSS/JS in layout.ts
+- QR generation page: info/note/status sections + station-filtered one-shot scan grid
+- No new API endpoints — all reuse existing: `/api/scan`, `/api/notes`, `/api/cabinets/:id`
 
 ### What just shipped (Phase 9: Push Notifications)
 - Web Push API with RFC 8291 encryption (pure Web Crypto, no Node.js deps)
