@@ -72,7 +72,7 @@ const SHOP_TEMPLATES: Record<string, Omit<TenantConfig, "shop_type">> = {
       { slug: "assembly", name: "Assembly", level: "l3", seq: 5, sets_status: "assembling" },
       { slug: "staging", name: "Staging", level: "l3", seq: 6, sets_status: "staged" },
     ],
-    l3_statuses: ["pending", "assembling", "staged"],
+    l3_statuses: ["pending", "assembling", "assembled", "staged"],
     l3_terminal_status: "staged",
     station_menus: [
       { slug: "cnc_eb", name: "CNC/EB", icon: "cpu", station_slugs: ["cnc_eb"], features: ["notes"], minRole: "user" },
@@ -2100,22 +2100,15 @@ app.post("/api/build/:id/complete", requireAuth(), async (c) => {
     "UPDATE build_sessions SET completed_at = ?, paused_at = NULL, total_paused_seconds = ? WHERE id = ?"
   ).bind(completedIso, totalPaused, id).run();
 
-  const assemblyComplete = config.stations.find((s) => s.sets_status === "assembled");
-  if (assemblyComplete) {
-    await c.env.DB.prepare("UPDATE cabinets SET status = ? WHERE id = ?")
-      .bind(assemblyComplete.sets_status, session.cabinet_id).run();
+  await c.env.DB.prepare("UPDATE cabinets SET status = 'assembled' WHERE id = ?")
+    .bind(session.cabinet_id).run();
 
-    const cab = await c.env.DB.prepare("SELECT bucket_id FROM cabinets WHERE id = ?")
-      .bind(session.cabinet_id).first<{ bucket_id: number | null }>();
+  const cab = await c.env.DB.prepare("SELECT bucket_id FROM cabinets WHERE id = ?")
+    .bind(session.cabinet_id).first<{ bucket_id: number | null }>();
 
-    await c.env.DB.prepare(
-      "INSERT INTO scans (job_id, bucket_id, cabinet_id, station, scanned_by) VALUES (?, ?, ?, ?, ?)"
-    ).bind(session.job_id, cab?.bucket_id || null, session.cabinet_id, assemblyComplete.slug, user.name).run();
-
-    if (assemblyComplete.sets_status === config.l3_terminal_status) {
-      await checkBucketCompletion(c.env.DB, session.cabinet_id, config);
-    }
-  }
+  await c.env.DB.prepare(
+    "INSERT INTO scans (job_id, bucket_id, cabinet_id, station, scanned_by) VALUES (?, ?, ?, ?, ?)"
+  ).bind(session.job_id, cab?.bucket_id || null, session.cabinet_id, "assembly_complete", user.name).run();
 
   const completed = await c.env.DB.prepare(
     "SELECT completed_at, ROUND((julianday(completed_at) - julianday(started_at)) * 1440, 1) as total_minutes FROM build_sessions WHERE id = ?"
