@@ -55,8 +55,23 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
     .flag-remake { background: rgba(239,68,68,0.2); color: #ef4444; }
     .flag-missing_part { background: rgba(139,92,246,0.2); color: #8b5cf6; }
     .flag-priority { background: rgba(59,130,246,0.2); color: #3b82f6; }
+    .install-banner { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; background:rgba(59,130,246,0.1); border:1px solid var(--accent); border-radius:10px; font-size:0.85rem; }
+    .install-banner-text { font-weight:600; color:var(--text); }
+    .install-banner-sub { font-size:0.75rem; color:var(--muted); margin-top:2px; }
+    .install-banner-btn { flex-shrink:0; padding:8px 14px; background:var(--accent); color:white; border:none; border-radius:8px; font-size:0.8rem; font-weight:700; cursor:pointer; }
+    .install-banner-dismiss { flex-shrink:0; background:none; border:none; color:var(--muted); font-size:1.2rem; cursor:pointer; padding:4px; }
   `, `
   <main>
+    <div id="install-banner" style="display:none">
+      <div class="install-banner">
+        <div>
+          <div class="install-banner-text">Add to Home Screen</div>
+          <div class="install-banner-sub">Quick access from your phone</div>
+        </div>
+        <button class="install-banner-btn" id="install-btn">Install</button>
+        <button class="install-banner-dismiss" id="install-dismiss">&times;</button>
+      </div>
+    </div>
     <div class="card" style="padding:10px 12px">
       <div class="station-carousel" id="station-carousel">
         <div class="station-prev" id="station-prev"></div>
@@ -524,6 +539,25 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
     }, { passive: true });
 
     window._fabworksHandleQR = handleQR;
+
+    // --- Install prompt ---
+    (function() {
+      if (window.matchMedia('(display-mode: standalone)').matches) return;
+      if (localStorage.getItem('fw_install_dismissed')) return;
+      var deferredPrompt = null;
+      window.addEventListener('beforeinstallprompt', function(e) {
+        e.preventDefault();
+        deferredPrompt = e;
+        document.getElementById('install-banner').style.display = 'block';
+      });
+      document.getElementById('install-btn').addEventListener('click', function() {
+        if (deferredPrompt) { deferredPrompt.prompt(); deferredPrompt.userChoice.then(function() { deferredPrompt = null; document.getElementById('install-banner').style.display = 'none'; }); }
+      });
+      document.getElementById('install-dismiss').addEventListener('click', function() {
+        document.getElementById('install-banner').style.display = 'none';
+        localStorage.setItem('fw_install_dismissed', '1');
+      });
+    })();
 
     var qrParam = new URLSearchParams(window.location.search).get('qr');
     if (qrParam) {

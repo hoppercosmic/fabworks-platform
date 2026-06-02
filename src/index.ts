@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
-import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage, workbenchPage, fixitPage, myWorkbenchPage, qrPage, stationMenuPage, profilePage, stagingPage, cabinetDetailPage, reportsPage, jobsManagerPage } from "./ui/index";
+import { scanPage, dashboardPage, newJobPage, jobDetailPage, stationViewPage, progressPage, loginPage, kpiPage, taktPage, adminPage, workbenchPage, fixitPage, myWorkbenchPage, qrPage, stationMenuPage, profilePage, stagingPage, cabinetDetailPage, reportsPage, jobsManagerPage, monitorPage } from "./ui/index";
 import { SERVICE_WORKER_JS } from "./offline";
 import { notifyByRole, notifyUser } from "./push";
 import { verifyWebhookSignature, storeWebhook, getWebhookSecret, enqueueEvents, processEventQueue, getQueueStatus, syncScanToAsana, syncFixitToAsana, registerAsanaWebhook, getWebhookStatus, storeMapping } from "./asana";
@@ -43,6 +43,7 @@ type TenantConfig = {
   l3_terminal_status: string;
   station_menus: StationMenu[];
   part_properties: PartPropertyDef[];
+  isStandalone?: boolean; // runtime flag: true when served from scan.fabworks.app
 };
 
 type UserRole = "user" | "lead" | "supervisor" | "admin";
@@ -248,10 +249,12 @@ type Bindings = { DB: D1Database; PHOTOS: R2Bucket; VAPID_PUBLIC_KEY: string; VA
 type Variables = { config: TenantConfig; user: SessionUser | null };
 const app = new Hono<{ Bindings: Bindings; Variables: Variables }>();
 
-app.use("*", cors({ origin: ["https://shop.fabworks.app"], allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], allowHeaders: ["Content-Type"], credentials: true }));
+app.use("*", cors({ origin: "*", allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"], allowHeaders: ["Content-Type"], credentials: true }));
 
 app.use("*", async (c, next) => {
   const config = await loadConfig(c.env.DB);
+  const host = c.req.header("host") || "";
+  config.isStandalone = host.startsWith("scan.");
   c.set("config", config);
   const sid = getCookie(c, "fw_session");
   const user = await getSessionUser(c.env.DB, sid);
@@ -804,6 +807,36 @@ app.get("/api/scans/recent", requireAuth(), async (c) => {
      LIMIT ?`
   ).bind(limit).all();
   return c.json(result.results);
+});
+
+// --- Events (action + note) ---
+
+const FLAG_ACTIONS = new Set(["hold", "remake", "missing_part"]);
+
+app.post("/api/events", requireAuth(), async (c) => {
+  const user = c.get("user")!;
+  const body = await c.req.json<{ cabinet_id: number; action_type: string; note?: string }>();
+  if (!body.cabinet_id || !body.action_type) return c.json({ error: "cabinet_id and action_type required" }, 400);
+
+  const cab = await c.env.DB.prepare(
+    "SELECT c.id, c.job_id, c.bucket_id, c.flags FROM cabinets c WHERE c.id = ?"
+  ).bind(body.cabinet_id).first<{ id: number; job_id: number; bucket_id: number | null; flags: string }>();
+  if (!cab) return c.json({ error: "Cabinet not found" }, 404);
+
+  const noteText = `[action:${body.action_type}]${body.note ? " " + body.note : ""}`;
+  await c.env.DB.prepare(
+    "INSERT INTO scans (job_id, bucket_id, cabinet_id, station, scanned_by, note) VALUES (?, ?, ?, ?, ?, ?)"
+  ).bind(cab.job_id, cab.bucket_id, cab.id, "event", user.name, noteText).run();
+
+  if (FLAG_ACTIONS.has(body.action_type)) {
+    const flags: string[] = JSON.parse(cab.flags || "[]");
+    if (!flags.includes(body.action_type)) {
+      flags.push(body.action_type);
+      await c.env.DB.prepare("UPDATE cabinets SET flags = ? WHERE id = ?").bind(JSON.stringify(flags), cab.id).run();
+    }
+  }
+
+  return c.json({ ok: true });
 });
 
 // --- Daily Briefs ---
@@ -2373,6 +2406,21 @@ const PWA_MANIFEST = JSON.stringify({
   ],
 });
 
+const PWA_MANIFEST_SCAN = JSON.stringify({
+  name: "FabWorks Scan",
+  short_name: "FW Scan",
+  description: "Shop Floor QR Scanner",
+  start_url: "/scan",
+  display: "standalone",
+  orientation: "portrait",
+  background_color: "#0f172a",
+  theme_color: "#0f172a",
+  icons: [
+    { src: "/icon-192.svg", sizes: "192x192", type: "image/svg+xml" },
+    { src: "/icon-512.svg", sizes: "512x512", type: "image/svg+xml" },
+  ],
+});
+
 const PWA_ICON = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
   <rect width="512" height="512" rx="96" fill="#1e293b"/>
   <rect x="24" y="24" width="464" height="464" rx="80" fill="#0f172a" stroke="#334155" stroke-width="4"/>
@@ -2450,7 +2498,9 @@ app.post("/api/asana/mappings", requireAuth("admin"), async (c) => {
 });
 
 app.get("/manifest.json", (c) => {
-  return c.body(PWA_MANIFEST, 200, { "Content-Type": "application/manifest+json" });
+  const host = c.req.header("host") || "";
+  const manifest = host.startsWith("scan.") ? PWA_MANIFEST_SCAN : PWA_MANIFEST;
+  return c.body(manifest, 200, { "Content-Type": "application/manifest+json" });
 });
 
 app.get("/icon-192.svg", (c) => c.body(PWA_ICON, 200, { "Content-Type": "image/svg+xml" }));
@@ -2485,6 +2535,7 @@ app.get("/qr", requireAuth("lead"), (c) => c.html(qrPage(c.get("config"), c.get(
 app.get("/kpi", requireAuth("lead"), (c) => c.html(kpiPage(c.get("config"), c.get("user")!)));
 app.get("/takt", requireAuth("lead"), (c) => c.html(taktPage(c.get("config"), c.get("user")!)));
 app.get("/reports", requireAuth("lead"), (c) => c.html(reportsPage(c.get("config"), c.get("user")!)));
+app.get("/monitor", requireAuth("lead"), (c) => c.html(monitorPage(c.get("config"), c.get("user")!)));
 app.get("/admin", requireAuth("admin"), (c) => c.html(adminPage(c.get("config"), c.get("user")!)));
 app.get("/workbench", requireAuth(), (c) => c.html(workbenchPage(c.get("config"), c.get("user")!)));
 app.get("/fixit", requireAuth(), (c) => c.html(fixitPage(c.get("config"), c.get("user")!)));

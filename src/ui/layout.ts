@@ -34,6 +34,7 @@ export const ROLE_LEVELS: Record<UserRole, number> = { user: 0, lead: 1, supervi
 type NavItem = { path: string; label: string; minRole: UserRole };
 
 const TOOLS_NAV: NavItem[] = [
+  { path: "/monitor",    label: "Monitor",   minRole: "lead" },
   { path: "/kpi",        label: "KPI",       minRole: "lead" },
   { path: "/takt",       label: "Takt",      minRole: "lead" },
   { path: "/reports",    label: "Reports",   minRole: "lead" },
@@ -123,6 +124,20 @@ export const SHARED_STYLES = `
       --warning: #f59e0b;
       --purple: #a855f7;
       --nav-h: 62px;
+    }
+    @media (prefers-color-scheme: light) {
+      :root {
+        --bg: #f1f5f9;
+        --surface: #ffffff;
+        --border: #cbd5e1;
+        --text: #0f172a;
+        --muted: #64748b;
+        --accent: #2563eb;
+        --success: #16a34a;
+        --error: #dc2626;
+        --warning: #d97706;
+        --purple: #9333ea;
+      }
     }
     body {
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
@@ -561,6 +576,51 @@ const USER_MENU_JS = `
         statusModal.addEventListener('click', function(e) { if (e.target === statusModal) statusModal.classList.remove('open'); });
       }
 
+      // --- Pause/event modal wiring ---
+      var pauseModal = document.getElementById('fw-pause-modal');
+      var pauseAction = document.getElementById('fw-pause-action');
+      var pauseNote = document.getElementById('fw-pause-note');
+      var pausePendingCabId = null;
+      if (pauseModal) {
+        document.getElementById('fw-pause-cancel').addEventListener('click', function() {
+          pauseModal.classList.remove('open'); pauseNote.value = ''; pausePendingCabId = null;
+        });
+        pauseModal.addEventListener('click', function(e) { if (e.target === pauseModal) { pauseModal.classList.remove('open'); pauseNote.value = ''; pausePendingCabId = null; } });
+        document.getElementById('fw-pause-save').addEventListener('click', function() {
+          if (!pausePendingCabId) return;
+          var actionVal = pauseAction.value;
+          var noteVal = pauseNote.value.trim();
+          fetch('/api/events', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ cabinet_id: pausePendingCabId, action_type: actionVal, note: noteVal })
+          }).then(function(r) {
+            if (r.ok) {
+              pauseModal.classList.remove('open'); pauseNote.value = ''; pausePendingCabId = null;
+              var actionLabel = pauseAction.options[pauseAction.selectedIndex].text;
+              showGlobalToast('Event logged: ' + actionLabel, 'success');
+            } else { showGlobalToast('Failed to log event', 'error'); }
+          }).catch(function() { showGlobalToast('Failed to log event', 'error'); });
+        });
+      }
+
+      // --- Notes/data-sheet modal wiring ---
+      var notesModal = document.getElementById('fw-notes-modal');
+      if (notesModal) {
+        document.getElementById('fw-notes-close').addEventListener('click', function() { notesModal.classList.remove('open'); });
+        notesModal.addEventListener('click', function(e) { if (e.target === notesModal) notesModal.classList.remove('open'); });
+        document.getElementById('fw-notes-addnote').addEventListener('click', function() {
+          var cabId = notesModal.dataset.cabId;
+          if (!cabId) return;
+          notesModal.classList.remove('open');
+          noteTitle.textContent = 'Note for Cabinet';
+          notePendingCabId = parseInt(cabId);
+          noteInput.value = '';
+          noteModal.classList.add('open');
+          setTimeout(function() { noteInput.focus(); }, 100);
+        });
+      }
+
       function onGlobalQR(text) {
         stopGlobalScanner();
         if (!text || !text.startsWith('fw:')) {
@@ -662,6 +722,74 @@ const USER_MENU_JS = `
           return;
         }
 
+        if (action === 'pause' && parts[2]) {
+          resolveJobCab(parts[2], function(detail, cab) {
+            var label = cab.label || ('#' + cab.cabinet_number);
+            document.getElementById('fw-pause-title').textContent = 'Event — ' + label + ' (' + detail.job_number + ')';
+            pausePendingCabId = cab.id;
+            pauseAction.value = 'pause_build';
+            pauseNote.value = '';
+            pauseModal.classList.add('open');
+            setTimeout(function() { pauseNote.focus(); }, 100);
+          });
+          return;
+        }
+
+        if (action === 'notes' && parts[2]) {
+          resolveJobCab(parts[2], function(detail, cab) {
+            var label = cab.label || ('#' + cab.cabinet_number);
+            document.getElementById('fw-notes-title').textContent = label + ' — ' + detail.job_number;
+            notesModal.dataset.cabId = String(cab.id);
+            document.getElementById('fw-notes-body').innerHTML = '<div style="color:var(--muted);font-size:0.85rem">Loading…</div>';
+            notesModal.classList.add('open');
+            Promise.all([
+              fetch('/api/cabinets/' + cab.id).then(function(r) { return r.json(); }),
+              fetch('/api/notes?context_type=cabinet&context_id=' + cab.id).then(function(r) { return r.json(); })
+            ]).then(function(results) {
+              var data = results[0];
+              var notesData = results[1];
+              var c2 = data.cabinet || {};
+              var props = {};
+              try { props = JSON.parse(c2.properties || '{}'); } catch(e) {}
+              var flags = [];
+              try { flags = JSON.parse(c2.flags || '[]'); } catch(e) {}
+              var html = '';
+              html += '<div class="fw-status-label">Status</div><div class="fw-status-value">' + escHtml((c2.status || 'pending').replace(/_/g,' ')) + '</div>';
+              if (flags.length) {
+                html += '<div class="fw-status-label">Flags</div><div class="fw-status-value">' + flags.map(function(f) { return '<span class="fw-flag-badge">' + escHtml(f) + '</span>'; }).join(' ') + '</div>';
+              }
+              var propKeys = Object.keys(props);
+              if (propKeys.length) {
+                html += '<div class="fw-status-label">Properties</div><div class="fw-status-value" style="font-size:0.8rem">';
+                propKeys.forEach(function(k) { html += '<div><b>' + escHtml(k) + ':</b> ' + escHtml(String(props[k])) + '</div>'; });
+                html += '</div>';
+              }
+              if (c2.accessories) {
+                html += '<div class="fw-status-label">Accessories</div><div class="fw-status-value">' + escHtml(c2.accessories) + '</div>';
+              }
+              if (c2.assembly_sheet_url) {
+                html += '<div class="fw-status-label">Assembly Sheet</div><div class="fw-status-value"><a href="' + escHtml(c2.assembly_sheet_url) + '" target="_blank" style="color:var(--accent)">' + escHtml(c2.assembly_sheet_url) + '</a></div>';
+              }
+              var notes = Array.isArray(notesData) ? notesData : (notesData.notes || []);
+              if (notes.length) {
+                html += '<div class="fw-status-label">Production Notes</div>';
+                notes.forEach(function(n) {
+                  html += '<div class="fw-status-row"><div>' + escHtml(n.content || '') + '</div><div style="color:var(--muted);font-size:0.7rem;margin-top:2px">' + escHtml(n.author_name || '') + '</div></div>';
+                });
+              }
+              var scans = data.scans || [];
+              if (scans.length) {
+                html += '<div class="fw-status-label">Recent Scans</div>';
+                scans.slice(0, 5).forEach(function(s) {
+                  html += '<div class="fw-status-row"><span>' + escHtml(s.station || '') + (s.scanned_by ? ' — ' + escHtml(s.scanned_by) : '') + '</span><span style="color:var(--muted);font-size:0.7rem">' + timeAgo(new Date(s.scanned_at + 'Z')) + '</span></div>';
+                });
+              }
+              document.getElementById('fw-notes-body').innerHTML = html;
+            });
+          });
+          return;
+        }
+
         if (action === 'menu' && parts[2]) {
           window.location.href = '/menu/' + parts[2];
           return;
@@ -684,7 +812,15 @@ const USER_MENU_JS = `
     })();
 `;
 
+function renderStandaloneBar(user: SessionUser): string {
+  return `<div class="standalone-bar">
+    <span class="standalone-title">FabWorks Scan</span>
+    <span class="standalone-user">${user.name.charAt(0).toUpperCase()}</span>
+  </div>`;
+}
+
 export function page(title: string, extraStyles: string, body: string, script: string, user: SessionUser | null, currentPath: string, cdnScripts: string[] = [], config: TenantConfig | null = null): string {
+  const isStandalone = config?.isStandalone || false;
   const cdnTags = cdnScripts.map((src) => `<script src="${src}"></script>`).join("\n  ");
   const scannerHtml = user ? `
   <div class="qr-fab" id="qr-fab">
@@ -729,22 +865,60 @@ export function page(title: string, extraStyles: string, body: string, script: s
       <h3 id="fw-status-title">Cabinet Status</h3>
       <div id="fw-status-body"></div>
     </div>
+  </div>
+  <div class="fw-modal" id="fw-pause-modal">
+    <div class="fw-modal-panel">
+      <h3 id="fw-pause-title">Log Event</h3>
+      <div style="margin-bottom:10px">
+        <label style="margin-bottom:6px">Action</label>
+        <select id="fw-pause-action" style="width:100%;padding:10px;font-size:0.9rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text)">
+          <option value="pause_build">Pause Build</option>
+          <option value="quality_issue">Quality Issue</option>
+          <option value="hold">Put on Hold</option>
+          <option value="remake">Mark for Remake</option>
+          <option value="missing_part">Missing Part</option>
+          <option value="escalate">Escalate</option>
+          <option value="custom">Custom Note</option>
+        </select>
+      </div>
+      <textarea id="fw-pause-note" placeholder="Add a note (optional)..." rows="3" style="width:100%;padding:10px;font-size:0.9rem;background:var(--bg);border:1px solid var(--border);border-radius:6px;color:var(--text);resize:vertical;box-sizing:border-box;font-family:inherit"></textarea>
+      <div class="fw-modal-actions">
+        <button class="fw-modal-cancel" id="fw-pause-cancel">Cancel</button>
+        <button class="fw-modal-save" id="fw-pause-save">Log Event</button>
+      </div>
+    </div>
+  </div>
+  <div class="fw-modal" id="fw-notes-modal">
+    <div class="fw-modal-panel" style="max-width:480px;max-height:80vh;overflow-y:auto">
+      <h3 id="fw-notes-title" style="margin-bottom:12px">Part Data</h3>
+      <div id="fw-notes-body"></div>
+      <div class="fw-modal-actions" style="margin-top:12px">
+        <button class="fw-modal-cancel" id="fw-notes-close">Close</button>
+        <button class="fw-modal-save" id="fw-notes-addnote">Add Note</button>
+      </div>
+    </div>
   </div>` : "";
-  const navHtml = user ? renderTopBar(currentPath, user, config) : `<div style="padding:0"></div>`;
-  const bodyPadding = user ? '' : 'body{padding-top:0;}';
+  const navHtml = user
+    ? (isStandalone ? renderStandaloneBar(user) : renderTopBar(currentPath, user, config))
+    : `<div style="padding:0"></div>`;
+  const bodyPadding = user
+    ? (isStandalone ? 'body{padding-top:52px;} .standalone-bar{position:fixed;top:0;left:0;right:0;z-index:100;height:52px;background:var(--surface);border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;padding:0 16px;padding-top:env(safe-area-inset-top);} .standalone-title{font-size:0.95rem;font-weight:700;color:var(--text);} .standalone-user{width:32px;height:32px;border-radius:50%;background:var(--accent);color:white;font-weight:700;font-size:0.8rem;display:flex;align-items:center;justify-content:center;}' : '')
+    : 'body{padding-top:0;}';
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <meta name="theme-color" content="#0f172a">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#0f172a" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f1f5f9" media="(prefers-color-scheme: light)">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-  <meta name="apple-mobile-web-app-title" content="FabWorks">
+  <meta name="apple-mobile-web-app-title" content="${isStandalone ? 'FW Scan' : 'FabWorks'}">
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" type="image/svg+xml" href="/icon-192.svg">
   <link rel="apple-touch-icon" href="/icon-192.svg">
-  <title>FabWorks — ${title}</title>
+  <title>${isStandalone ? 'FabWorks Scan' : 'FabWorks — ' + title}</title>
   <style>${SHARED_STYLES}${OFFLINE_STYLES}${bodyPadding}${extraStyles}</style>
 </head>
 <body>

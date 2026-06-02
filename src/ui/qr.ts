@@ -270,6 +270,37 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
           html += '</select>';
           html += '<div id="scan-qr-grid" class="qr-grid"></div>';
         }
+
+        // Action QRs (fw:pause)
+        html += '<div class="qr-section" style="margin-top:12px">Action QRs</div>';
+        html += '<div style="margin:4px 0 8px;font-size:0.75rem;color:var(--muted)">Stick on cabinets. Scan to open event log with the selected action pre-filled.</div>';
+        html += '<select id="action-type-filter" style="margin-bottom:12px;padding:8px 12px;background:var(--surface);color:var(--text);border:1px solid var(--border);border-radius:6px;font-size:0.85rem;width:100%">';
+        html += '<option value="">Select action type...</option>';
+        var ACTION_TYPES = [
+          { value: 'pause_build', label: 'Pause Build' },
+          { value: 'quality_issue', label: 'Quality Issue' },
+          { value: 'hold', label: 'Put on Hold' },
+          { value: 'remake', label: 'Mark for Remake' },
+          { value: 'missing_part', label: 'Missing Part' },
+          { value: 'escalate', label: 'Escalate' },
+        ];
+        ACTION_TYPES.forEach(function(a) { html += '<option value="' + a.value + '">' + a.label + '</option>'; });
+        html += '</select>';
+        html += '<div id="action-qr-grid" class="qr-grid"></div>';
+
+        // Data Sheet QRs (fw:notes)
+        html += '<div class="qr-section" style="margin-top:12px">Data Sheet QRs</div>';
+        html += '<div style="margin:4px 0 8px;font-size:0.75rem;color:var(--muted)">Scan to view full part data: dimensions, materials, notes, scan history.</div>';
+        html += '<div class="qr-grid" id="notes-qr-grid">';
+        job.cabinets.forEach(function(c) {
+          var notesCode = 'fw:notes:' + job.job_number + '-' + c.cabinet_number;
+          var label = c.label || (LABELS.l3 + ' ' + c.cabinet_number);
+          html += '<div class="qr-card" style="border-left:3px solid #0d9488" data-code="' + notesCode + '" data-title="Data Sheet #' + c.cabinet_number + '" data-sub="' + escHtml(label) + '">';
+          html += '<img id="qr-notes-' + c.id + '" width="220" height="220" alt="QR" />';
+          html += '<div class="qr-title">Sheet #' + c.cabinet_number + '</div>';
+          html += '<div class="qr-sub" style="color:#0d9488">Scan → Part Data</div></div>';
+        });
+        html += '</div>';
       }
 
       jobContent.innerHTML = html;
@@ -341,6 +372,62 @@ export function qrPage(config: TenantConfig, user: SessionUser): string {
             card.addEventListener('click', function() { showSpotlight(card.dataset.code, card.dataset.title, card.dataset.sub); });
             scanGrid.appendChild(card);
             QRCode.toDataURL(scanCode, { width: 220, margin: 1 }, function(e, u) { imgEl.src = u; });
+          });
+        });
+      }
+
+      // Action QR filter
+      var actionFilter = document.getElementById('action-type-filter');
+      var actionGrid = document.getElementById('action-qr-grid');
+      if (actionFilter && actionGrid) {
+        actionFilter.addEventListener('change', function() {
+          var actionVal = actionFilter.value;
+          actionGrid.innerHTML = '';
+          if (!actionVal) return;
+          var actionLabel = actionFilter.options[actionFilter.selectedIndex].text;
+          job.cabinets.forEach(function(c) {
+            var pauseCode = 'fw:pause:' + job.job_number + '-' + c.cabinet_number;
+            var label = c.label || (LABELS.l3 + ' ' + c.cabinet_number);
+            var card = document.createElement('div');
+            card.className = 'qr-card';
+            card.style.borderLeft = '3px solid #f97316';
+            card.dataset.code = pauseCode;
+            card.dataset.title = actionLabel + ' #' + c.cabinet_number;
+            card.dataset.sub = escHtml(label);
+            var imgEl = document.createElement('img');
+            imgEl.width = 220; imgEl.height = 220; imgEl.alt = 'QR';
+            card.appendChild(imgEl);
+            var t = document.createElement('div');
+            t.className = 'qr-title';
+            t.textContent = actionLabel + ' #' + c.cabinet_number;
+            card.appendChild(t);
+            var sub = document.createElement('div');
+            sub.className = 'qr-sub';
+            sub.style.color = '#f97316';
+            sub.textContent = 'Scan → Log Event';
+            card.appendChild(sub);
+            card.addEventListener('click', function() { showSpotlight(card.dataset.code, card.dataset.title, card.dataset.sub); });
+            actionGrid.appendChild(card);
+            QRCode.toDataURL(pauseCode, { width: 220, margin: 1 }, function(e, u) { imgEl.src = u; });
+          });
+        });
+      }
+
+      // Data Sheet QRs
+      job.cabinets.forEach(function(c) {
+        var notesCode = 'fw:notes:' + job.job_number + '-' + c.cabinet_number;
+        QRCode.toDataURL(notesCode, { width: 220, margin: 1 }, function(e, u) {
+          var el = document.getElementById('qr-notes-' + c.id);
+          if (el) el.src = u;
+        });
+      });
+
+      // Click-to-spotlight for notes QR cards
+      var notesGrid = document.getElementById('notes-qr-grid');
+      if (notesGrid) {
+        notesGrid.querySelectorAll('.qr-card').forEach(function(card) {
+          card.addEventListener('click', function() {
+            showSpotlight(card.dataset.code, card.dataset.title, card.dataset.sub);
           });
         });
       }

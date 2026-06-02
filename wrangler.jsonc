@@ -1,6 +1,7 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "fabworks",
+  // "account_id": "YOUR_CLOUDFLARE_ACCOUNT_ID",  // optional: set here or via CLOUDFLARE_ACCOUNT_ID env var
   "main": "src/index.ts",
   "compatibility_date": "2025-05-01",
   "workers_dev": true,
@@ -8,7 +9,7 @@
     {
       "binding": "DB",
       "database_name": "fabworks-db",
-      "database_id": "84dbe74d-c6ff-4c90-8996-91598ef284f6"
+      "database_id": "YOUR_D1_DATABASE_ID"
     }
   ],
   "r2_buckets": [
@@ -16,9 +17,12 @@
       "binding": "PHOTOS",
       "bucket_name": "fabworks-photos"
     }
-  ],
-  "routes": [
-    { "pattern": "shop.fabworks.app", "zone_name": "fabworks.app" },
-    { "pattern": "shop.fabworks.app/*", "zone_name": "fabworks.app" }
   ]
+  // Uncomment and configure routes for a custom domain:
+  // "routes": [
+  //   { "pattern": "shop.yourdomain.com", "zone_name": "yourdomain.com" },
+  //   { "pattern": "shop.yourdomain.com/*", "zone_name": "yourdomain.com" },
+  //   { "pattern": "scan.yourdomain.com", "zone_name": "yourdomain.com" },
+  //   { "pattern": "scan.yourdomain.com/*", "zone_name": "yourdomain.com" }
+  // ]
 }
