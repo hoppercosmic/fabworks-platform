@@ -218,13 +218,15 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
             }).join('');
 
             var jobs = byJob[a.assembler] || [];
+            var aTotal = a.total_completed || 1;
             var jobsHtml = jobs.map(function(jb) {
-              var pct = jb.job_total > 0 ? Math.round((jb.completed / jb.job_total) * 100) : 0;
+              // share of THIS assembler's own output — "where their day went"
+              var pct = Math.round((jb.completed / aTotal) * 100);
               return '<div class="kpi-bar-row">' +
                 '<span class="job-label" title="' + escHtml(jb.job_number + ' ' + jb.job_name) + '">' + escHtml(jb.job_number + ' ' + jb.job_name) + '</span>' +
                 '<div class="kpi-bar-track"><div class="kpi-bar-fill purple" style="width:' + pct + '%"></div></div>' +
                 '<span class="count">' + pct + '%</span>' +
-                '<span class="pause-tag job-of">' + jb.completed + '/' + jb.job_total + '</span>' +
+                '<span class="pause-tag job-of">' + jb.completed + '</span>' +
                 '</div>';
             }).join('');
 
@@ -252,7 +254,7 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
             var fixitStat = '<div class="kpi-stat"><div class="val ' + fixitClass + '">' + fixitRate + '%</div><div class="lbl">Defect Rate (' + fixitCount + ')</div></div>';
 
             return '<div class="kpi-card">' +
-              '<div><span class="name">' + a.assembler + '</span> <span class="rank">#' + (idx + 1) + '</span>' + badge + '</div>' +
+              '<div><span class="name">' + a.assembler + '</span>' + badge + '</div>' +
               '<div class="kpi-stats">' +
                 '<div class="kpi-stat"><div class="val success">' + a.total_completed + '</div><div class="lbl">Completed</div></div>' +
                 '<div class="kpi-stat"><div class="val accent">' + a.per_day + '</div><div class="lbl">Per Day</div></div>' +
@@ -266,7 +268,7 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
                 '<span class="fast">Best: ' + fmtMin(a.min_minutes) + '</span>' +
                 '<span class="slow">Slowest: ' + fmtMin(a.max_minutes) + '</span>' +
               '</div>' +
-              (jobsHtml ? '<div class="kpi-breakdown-label">By Job (completed · avg build)</div><div>' + jobsHtml + '</div>' : '') +
+              (jobsHtml ? '<div class="kpi-breakdown-label">Where their day went (% of their builds)</div><div>' + jobsHtml + '</div>' : '') +
               (barsHtml ? '<div class="kpi-breakdown-label">By Day (completed · avg pause)</div><div>' + barsHtml + '</div>' : '') +
             '</div>';
           }).join('');

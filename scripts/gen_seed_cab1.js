@@ -75,21 +75,33 @@ const cabinets = [];
 const sessions = [];
 const pauseReasons = ["material_wait", "missing_part", "machine", "help_needed", "break", "defect"];
 
-const todayAgo = () => ri(15, 7 * 60);            // within current ~7h shift (stays same UTC day on morning refresh)
+// Minutes since the current UTC midnight, evaluated at apply time. Anchoring
+// completions to "start of day + fraction × elapsed" guarantees every completion
+// lands within *today* no matter what hour the seed is applied (no midnight
+// straddling), so per-day / today counts always read correctly.
+const ELAPSED = "(strftime('%H','now')*60 + strftime('%M','now'))";
+const atFrac = (f) => `datetime('now','start of day','+' || CAST(${f.toFixed(4)} * ${ELAPSED} AS INT) || ' minutes')`;
+// clamp the offset to >= 0 so the modifier is always "+N minutes" (a negative
+// value would produce the invalid "+-N minutes" → NULL) and never crosses midnight
+const atFracMinus = (f, m) => `datetime('now','start of day','+' || MAX(0, CAST(${f.toFixed(4)} * ${ELAPSED} AS INT) - ${m}) || ' minutes')`;
 
-function addCompleted(cab, uid, agoMin) {
+function addCompleted(cab, uid) {
   const working = buildMinutes(uid);
   const paused = pausedMinutes(uid);
+  const dur = working + paused;
+  const f = 0.04 + rnd() * 0.95;            // fraction through today's elapsed shift
+  const completeExpr = atFrac(f);
+  const startExpr = atFracMinus(f, dur);
   sessId++;
   sessions.push({ id: sessId, cabId: cab.id, jobId: cab.jobId, userId: uid,
-    startedAgo: agoMin + working + paused, completedAgo: agoMin, pausedSecs: paused * 60, active: false });
+    startExpr, completeExpr, frac: f, pausedSecs: paused * 60, active: false });
   const who = esc(userById(uid).name);
-  scanId++; w(`INSERT INTO scans (id, job_id, bucket_id, cabinet_id, station, scanned_by, scanned_at) VALUES (${scanId}, ${cab.jobId}, ${cab.bucketId}, ${cab.id}, 'assembly', '${who}', datetime('now','-${agoMin} minutes'));`);
-  scanId++; w(`INSERT INTO scans (id, job_id, bucket_id, cabinet_id, station, scanned_by, scanned_at) VALUES (${scanId}, ${cab.jobId}, ${cab.bucketId}, ${cab.id}, 'assembly_complete', '${who}', datetime('now','-${agoMin} minutes'));`);
+  scanId++; w(`INSERT INTO scans (id, job_id, bucket_id, cabinet_id, station, scanned_by, scanned_at) VALUES (${scanId}, ${cab.jobId}, ${cab.bucketId}, ${cab.id}, 'assembly', '${who}', ${completeExpr});`);
+  scanId++; w(`INSERT INTO scans (id, job_id, bucket_id, cabinet_id, station, scanned_by, scanned_at) VALUES (${scanId}, ${cab.jobId}, ${cab.bucketId}, ${cab.id}, 'assembly_complete', '${who}', ${completeExpr});`);
   if (paused > 0 && rnd() < 0.8) {
     pauseId++;
     const r = pick(pauseReasons);
-    w(`INSERT INTO pause_events (id, build_session_id, user_id, reason, note, paused_at, resumed_at) VALUES (${pauseId}, ${sessId}, ${uid}, '${r}', ${r === 'missing_part' ? "'left side panel short'" : 'NULL'}, datetime('now','-${agoMin + ri(2, 6)} minutes'), datetime('now','-${agoMin + 1} minutes'));`);
+    w(`INSERT INTO pause_events (id, build_session_id, user_id, reason, note, paused_at, resumed_at) VALUES (${pauseId}, ${sessId}, ${uid}, '${r}', ${r === 'missing_part' ? "'left side panel short'" : 'NULL'}, ${atFracMinus(f, ri(2, 6))}, ${completeExpr});`);
   }
 }
 
@@ -128,7 +140,7 @@ for (const job of jobs) {
   // completed — all within today's shift so the day's total reflects ~200/day
   for (let d = 0; d < job.done; d++, i++) {
     cs[i].status = job.staged ? "staged" : "assembled";
-    addCompleted(cs[i], pickAssembler(), todayAgo());
+    addCompleted(cs[i], pickAssembler());
   }
   // active now
   for (let a = 0; a < job.active; a++, i++) {
@@ -146,8 +158,11 @@ for (const job of jobs) {
 // staging scans for staged cabinets (water spider Hector), a bit after assembly
 cabinets.filter((c) => c.status === "staged").forEach((cab) => {
   const s = sessions.find((x) => x.cabId === cab.id && !x.active);
-  const stageAgo = s ? Math.max(1, s.completedAgo - ri(8, 30)) : ri(30, 600);
-  scanId++; w(`INSERT INTO scans (id, job_id, bucket_id, cabinet_id, station, scanned_by, scanned_at) VALUES (${scanId}, ${cab.jobId}, ${cab.bucketId}, ${cab.id}, 'staging', 'Hector', datetime('now','-${stageAgo} minutes'));`);
+  // staged a bit after assembly, clamped to no later than "now"
+  const stageExpr = s
+    ? `MIN(datetime('now','-1 minutes'), datetime('now','start of day','+' || (CAST(${s.frac.toFixed(4)} * ${ELAPSED} AS INT) + ${ri(5, 25)}) || ' minutes'))`
+    : `datetime('now','-${ri(30, 600)} minutes')`;
+  scanId++; w(`INSERT INTO scans (id, job_id, bucket_id, cabinet_id, station, scanned_by, scanned_at) VALUES (${scanId}, ${cab.jobId}, ${cab.bucketId}, ${cab.id}, 'staging', 'Hector', ${stageExpr});`);
 });
 
 // ── FixIt defects (low rate ~3%) + a couple remake flags ──
@@ -185,7 +200,7 @@ head.push("");
 const cabSql = cabinets.map((c) => `INSERT INTO cabinets (id, job_id, bucket_id, cabinet_number, label, status, flags) VALUES (${c.id}, ${c.jobId}, ${c.bucketId}, ${c.num}, '${esc(c.label)}', '${c.status}', '${c.flags}');`);
 const sessSql = sessions.map((s) => s.active
   ? `INSERT INTO build_sessions (id, cabinet_id, job_id, user_id, started_at, paused_at, completed_at, total_paused_seconds) VALUES (${s.id}, ${s.cabId}, ${s.jobId}, ${s.userId}, datetime('now','-${s.startedAgo} minutes'), ${s.pausedNow ? `datetime('now','-${s.pauseAgo} minutes')` : "NULL"}, NULL, 0);`
-  : `INSERT INTO build_sessions (id, cabinet_id, job_id, user_id, started_at, paused_at, completed_at, total_paused_seconds) VALUES (${s.id}, ${s.cabId}, ${s.jobId}, ${s.userId}, datetime('now','-${s.startedAgo} minutes'), NULL, datetime('now','-${s.completedAgo} minutes'), ${s.pausedSecs});`);
+  : `INSERT INTO build_sessions (id, cabinet_id, job_id, user_id, started_at, paused_at, completed_at, total_paused_seconds) VALUES (${s.id}, ${s.cabId}, ${s.jobId}, ${s.userId}, ${s.startExpr}, NULL, ${s.completeExpr}, ${s.pausedSecs});`);
 
 const sql = [
   ...head,

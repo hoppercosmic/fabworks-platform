@@ -1337,18 +1337,22 @@ app.get("/api/kpi/takt", requireAuth("lead"), async (c) => {
 
 app.get("/api/reports/jobs", requireAuth("lead"), async (c) => {
   const config = c.get("config");
-  const terminalStatus = config.l3_terminal_status;
+  // "Done" = assembled or beyond (the last two L3 stages), matching the
+  // dashboard progress. Counting only the terminal stage made finished-but-
+  // not-yet-staged jobs read 0% complete.
+  const doneStatuses = config.l3_statuses.slice(-2);
+  const donePlaceholders = doneStatuses.map(() => "?").join(",");
 
   const jobs = await c.env.DB.prepare(
     `SELECT j.id, j.job_number, j.job_name, j.status, j.cabinet_count,
        COUNT(c.id) as actual_cabinets,
-       COUNT(CASE WHEN c.status = ? THEN 1 END) as completed_count
+       COUNT(CASE WHEN c.status IN (${donePlaceholders}) THEN 1 END) as completed_count
      FROM jobs j
      LEFT JOIN cabinets c ON c.job_id = j.id
      WHERE j.status != 'cancelled'
      GROUP BY j.id
      ORDER BY CASE j.status WHEN 'active' THEN 0 WHEN 'complete' THEN 1 ELSE 2 END, j.job_number`
-  ).bind(terminalStatus).all();
+  ).bind(...doneStatuses).all();
 
   const statusBreakdown = await c.env.DB.prepare(
     `SELECT j.id as job_id, c.status, COUNT(*) as count
@@ -1381,18 +1385,19 @@ app.get("/api/reports/jobs", requireAuth("lead"), async (c) => {
 
 app.get("/api/reports/jobs/csv", requireAuth("lead"), async (c) => {
   const config = c.get("config");
-  const terminalStatus = config.l3_terminal_status;
+  const doneStatuses = config.l3_statuses.slice(-2);
+  const donePlaceholders = doneStatuses.map(() => "?").join(",");
 
   const jobs = await c.env.DB.prepare(
     `SELECT j.job_number, j.job_name, j.status, j.cabinet_count,
        COUNT(c.id) as actual_cabinets,
-       COUNT(CASE WHEN c.status = ? THEN 1 END) as completed_count
+       COUNT(CASE WHEN c.status IN (${donePlaceholders}) THEN 1 END) as completed_count
      FROM jobs j
      LEFT JOIN cabinets c ON c.job_id = j.id
      WHERE j.status != 'cancelled'
      GROUP BY j.id
      ORDER BY j.job_number`
-  ).bind(terminalStatus).all();
+  ).bind(...doneStatuses).all();
 
   const rows = (jobs.results as Array<Record<string, unknown>>).map(j => {
     const total = (j.actual_cabinets as number) || (j.cabinet_count as number) || 0;
