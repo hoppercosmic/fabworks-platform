@@ -2235,9 +2235,10 @@ app.get("/api/my/workbench", requireAuth(), async (c) => {
      LIMIT 10`
   ).bind(user.id).all();
 
+  // Whole-team total for today (not just this user)
   const todayCompleted = await c.env.DB.prepare(
-    "SELECT COUNT(*) as cnt FROM build_sessions WHERE user_id = ? AND completed_at IS NOT NULL AND DATE(completed_at) = DATE('now')"
-  ).bind(user.id).first<{ cnt: number }>();
+    "SELECT COUNT(*) as cnt FROM build_sessions WHERE completed_at IS NOT NULL AND DATE(completed_at) = DATE('now')"
+  ).first<{ cnt: number }>();
 
   return c.json({
     active_session: activeSession || null,

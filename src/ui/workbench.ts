@@ -578,7 +578,7 @@ export function myWorkbenchPage(config: TenantConfig, user: SessionUser): string
   `, `
   <main>
     <div class="greeting">Hey, ${user.name.split(" ")[0]}</div>
-    <div class="today-stat"><span class="count" id="today-count">—</span> ${L3}s completed today</div>
+    <div class="today-stat"><span class="count" id="today-count">—</span> ${L3}s built by the team today</div>
 
     <div id="active-section" style="display:none">
       <div class="section-title">Active Build</div>
