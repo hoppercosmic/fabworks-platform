@@ -29,6 +29,9 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
     .kpi-bar-row { display: flex; align-items: center; gap: 6px; font-size: 0.7rem; color: var(--muted); }
     .kpi-breakdown-label { font-size: 0.6rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin-top: 10px; margin-bottom: 4px; }
     .kpi-bar-row .day-label { width: 40px; text-align: right; flex-shrink: 0; }
+    .kpi-bar-row .job-label { flex: 0 0 110px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .kpi-bar-row .count { min-width: 30px; text-align: right; }
+    .kpi-bar-row .job-of { width: 42px; color: var(--muted); }
     .kpi-bar-track { flex: 1; height: 14px; background: var(--bg); border-radius: 3px; overflow: hidden; }
     .kpi-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
     .kpi-bar-fill.blue { background: var(--accent); }
@@ -215,15 +218,13 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
             }).join('');
 
             var jobs = byJob[a.assembler] || [];
-            var maxJob = 1;
-            jobs.forEach(function(jb) { if (jb.completed > maxJob) maxJob = jb.completed; });
             var jobsHtml = jobs.map(function(jb) {
-              var pct = Math.round((jb.completed / maxJob) * 100);
+              var pct = jb.job_total > 0 ? Math.round((jb.completed / jb.job_total) * 100) : 0;
               return '<div class="kpi-bar-row">' +
-                '<span class="day-label" title="' + escHtml(jb.job_name) + '">' + escHtml(jb.job_number) + '</span>' +
+                '<span class="job-label" title="' + escHtml(jb.job_number + ' ' + jb.job_name) + '">' + escHtml(jb.job_number + ' ' + jb.job_name) + '</span>' +
                 '<div class="kpi-bar-track"><div class="kpi-bar-fill purple" style="width:' + pct + '%"></div></div>' +
-                '<span class="count">' + jb.completed + '</span>' +
-                (jb.avg_minutes != null ? '<span class="pause-tag">' + fmtMin(jb.avg_minutes) + '</span>' : '') +
+                '<span class="count">' + pct + '%</span>' +
+                '<span class="pause-tag job-of">' + jb.completed + '/' + jb.job_total + '</span>' +
                 '</div>';
             }).join('');
 
