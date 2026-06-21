@@ -68,9 +68,11 @@ function addCompleted(cab, userId, agoMin) {
     startedAgo: agoMin + totalMin, completedAgo: agoMin,
     pausedSecs: paused * 60, active: false, pausedNow: false,
   });
-  // assembly_complete scan
+  // assembly_complete (build flow) + assembly station scan (feeds Monitor bars)
   scanId++;
   w(`INSERT INTO scans (id, job_id, bucket_id, cabinet_id, station, scanned_by, scanned_at) VALUES (${scanId}, ${cab.jobId}, ${cab.bucketId}, ${cab.id}, 'assembly_complete', '${esc(userById(userId).name)}', datetime('now','-${agoMin} minutes'));`);
+  scanId++;
+  w(`INSERT INTO scans (id, job_id, bucket_id, cabinet_id, station, scanned_by, scanned_at) VALUES (${scanId}, ${cab.jobId}, ${cab.bucketId}, ${cab.id}, 'assembly', '${esc(userById(userId).name)}', datetime('now','-${agoMin} minutes'));`);
   // 0-2 closed pause events with reasons
   const nEv = paused > 0 ? ri(1, 2) : (rnd() < 0.3 ? 1 : 0);
   for (let k = 0; k < nEv; k++) {
@@ -119,7 +121,9 @@ function jobCabs(jid) { return cabinets.filter((c) => c.jobId === jid); }
   const cs = jobCabs(1);
   cs.forEach((cab, i) => {
     cab.status = "staged"; // done + staged by water spider
-    const ago = ri(60, 3 * 24 * 60); // 1h .. 3 days ago
+    // First job wrapped this morning: most completions land in TODAY's window
+    // (last ~7h), the rest carried over from the prior day or two.
+    const ago = i < 16 ? ri(45, 420) : ri(20 * 60, 40 * 60);
     addCompleted(cab, nextAssembler(), ago);
   });
 }
@@ -130,7 +134,7 @@ function jobCabs(jid) { return cabinets.filter((c) => c.jobId === jid); }
   cs.forEach((cab, i) => {
     if (i < 17) {
       cab.status = "assembled";
-      const ago = i < 10 ? ri(20, 8 * 60) : ri(8 * 60, 30 * 60); // today / yesterday-ish
+      const ago = ri(20, 420); // all completed across today's shift
       addCompleted(cab, nextAssembler(), ago);
     } else if (i < 19) {
       cab.status = "assembling";
@@ -163,6 +167,12 @@ function jobCabs(jid) { return cabinets.filter((c) => c.jobId === jid); }
 
 // J4 pending/new: all pending, nothing released to assembly yet
 // (no scans, no sessions — represents the next job queued on the floor)
+
+// Staging scans for finished cabinets (water spider staged them) — feeds Monitor staging bar
+cabinets.filter((c) => c.status === "staged").forEach((cab) => {
+  scanId++;
+  w(`INSERT INTO scans (id, job_id, bucket_id, cabinet_id, station, scanned_by, scanned_at) VALUES (${scanId}, ${cab.jobId}, ${cab.bucketId}, ${cab.id}, 'staging', 'Hector', datetime('now','-${ri(30, 600)} minutes'));`);
+});
 
 // ── Emit users ──────────────────────────────────────────
 const head = [];
