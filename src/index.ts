@@ -1174,6 +1174,17 @@ app.get("/api/kpi/assemblers", requireAuth("lead"), async (c) => {
   const totalCompleted = assemblers.reduce((s, a) => s + ((a as Record<string, unknown>).total_completed as number || 0), 0);
   const teamFixitRate = totalCompleted > 0 ? Math.round((totalFixits / totalCompleted) * 1000) / 10 : 0;
 
+  // Team-level defect cause breakdown (more meaningful aggregated than per-person)
+  const teamCause = await c.env.DB.prepare(
+    `SELECT
+       COUNT(CASE WHEN root_cause = 'cnc_error' THEN 1 END) AS cnc_error,
+       COUNT(CASE WHEN root_cause = 'material_defect' THEN 1 END) AS material_defect,
+       COUNT(CASE WHEN root_cause = 'transit_damage' THEN 1 END) AS transit_damage,
+       COUNT(CASE WHEN root_cause = 'other' THEN 1 END) AS other_cause
+     FROM fixit_requests
+     WHERE created_at >= datetime('now', '-' || ? || ' days')`
+  ).bind(days).first<{ cnc_error: number; material_defect: number; transit_damage: number; other_cause: number }>();
+
   return c.json({
     assemblers,
     daily: dailyByAssembler,
@@ -1184,6 +1195,7 @@ app.get("/api/kpi/assemblers", requireAuth("lead"), async (c) => {
     days,
     team_fixits: totalFixits,
     team_fixit_rate: teamFixitRate,
+    team_fixit_breakdown: teamCause,
   });
 });
 
