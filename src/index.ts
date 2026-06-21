@@ -1080,6 +1080,26 @@ app.get("/api/kpi/assemblers", requireAuth("lead"), async (c) => {
     dailyByAssembler[row.assembler].push({ day: row.day, completed: row.completed });
   }
 
+  // Per-assembler breakdown by job (completed builds + avg build minutes)
+  const byJob = await c.env.DB.prepare(
+    `SELECT u.name AS assembler, j.job_number, j.job_name,
+       COUNT(*) AS completed,
+       ROUND(AVG((julianday(bs.completed_at) - julianday(bs.started_at)) * 1440 - bs.total_paused_seconds / 60.0), 1) AS avg_minutes
+     FROM build_sessions bs
+     JOIN users u ON bs.user_id = u.id
+     JOIN jobs j ON bs.job_id = j.id
+     WHERE bs.completed_at IS NOT NULL
+       AND bs.completed_at >= datetime('now', '-' || ? || ' days')
+     GROUP BY bs.user_id, bs.job_id
+     ORDER BY completed DESC`
+  ).bind(days).all();
+
+  const jobsByAssembler: Record<string, Array<{ job_number: string; job_name: string; completed: number; avg_minutes: number }>> = {};
+  for (const row of byJob.results as Array<{ assembler: string; job_number: string; job_name: string; completed: number; avg_minutes: number }>) {
+    if (!jobsByAssembler[row.assembler]) jobsByAssembler[row.assembler] = [];
+    jobsByAssembler[row.assembler].push({ job_number: row.job_number, job_name: row.job_name, completed: row.completed, avg_minutes: row.avg_minutes });
+  }
+
   const timerData = await c.env.DB.prepare(
     `SELECT
        u.name as assembler,
@@ -1157,6 +1177,7 @@ app.get("/api/kpi/assemblers", requireAuth("lead"), async (c) => {
   return c.json({
     assemblers,
     daily: dailyByAssembler,
+    by_job: jobsByAssembler,
     pause_daily: pauseDailyByAssembler,
     start_station: config.stations.find((s) => s.slug === startStation)?.name,
     end_station: config.stations.find((s) => s.slug === endStation)?.name,

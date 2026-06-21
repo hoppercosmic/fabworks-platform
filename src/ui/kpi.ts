@@ -27,6 +27,7 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
     .kpi-stat .val.purple { color: var(--purple); }
     .kpi-stat .val.error { color: var(--error); }
     .kpi-bar-row { display: flex; align-items: center; gap: 6px; font-size: 0.7rem; color: var(--muted); }
+    .kpi-breakdown-label { font-size: 0.6rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin-top: 10px; margin-bottom: 4px; }
     .kpi-bar-row .day-label { width: 40px; text-align: right; flex-shrink: 0; }
     .kpi-bar-track { flex: 1; height: 14px; background: var(--bg); border-radius: 3px; overflow: hidden; }
     .kpi-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
@@ -172,6 +173,7 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
           });
 
           var pauseDaily = data.pause_daily || {};
+          var byJob = data.by_job || {};
 
           gridDiv.innerHTML = assemblers.map(function(a, idx) {
             var days7 = (daily[a.assembler] || []).slice(-7);
@@ -187,6 +189,19 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
                 '<span class="day-label">' + dayLabel + '</span>' +
                 '<div class="kpi-bar-track"><div class="kpi-bar-fill blue" style="width:' + pct + '%"></div></div>' +
                 '<span class="count">' + d.completed + '</span>' + pauseLabel + '</div>';
+            }).join('');
+
+            var jobs = byJob[a.assembler] || [];
+            var maxJob = 1;
+            jobs.forEach(function(jb) { if (jb.completed > maxJob) maxJob = jb.completed; });
+            var jobsHtml = jobs.map(function(jb) {
+              var pct = Math.round((jb.completed / maxJob) * 100);
+              return '<div class="kpi-bar-row">' +
+                '<span class="day-label" title="' + escHtml(jb.job_name) + '">' + escHtml(jb.job_number) + '</span>' +
+                '<div class="kpi-bar-track"><div class="kpi-bar-fill purple" style="width:' + pct + '%"></div></div>' +
+                '<span class="count">' + jb.completed + '</span>' +
+                (jb.avg_minutes != null ? '<span class="pause-tag">' + fmtMin(jb.avg_minutes) + '</span>' : '') +
+                '</div>';
             }).join('');
 
             var src = a.source || 'estimated';
@@ -243,7 +258,8 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
                 '<span class="fast">Best: ' + fmtMin(a.min_minutes) + '</span>' +
                 '<span class="slow">Slowest: ' + fmtMin(a.max_minutes) + '</span>' +
               '</div>' +
-              (barsHtml ? '<div>' + barsHtml + '</div>' : '') +
+              (jobsHtml ? '<div class="kpi-breakdown-label">By Job (completed · avg build)</div><div>' + jobsHtml + '</div>' : '') +
+              (barsHtml ? '<div class="kpi-breakdown-label">By Day (completed · avg pause)</div><div>' + barsHtml + '</div>' : '') +
             '</div>';
           }).join('');
         });
