@@ -2064,7 +2064,7 @@ app.get("/api/build/:id", requireAuth(), async (c) => {
 app.post("/api/build/:id/pause", requireAuth(), async (c) => {
   const user = c.get("user")!;
   const id = parseInt(c.req.param("id"), 10);
-  const body = await c.req.json().catch(() => ({})) as { client_timestamp?: string };
+  const body = await c.req.json().catch(() => ({})) as { client_timestamp?: string; reason?: string; note?: string };
   const isLead = ROLE_LEVELS[user.role] >= ROLE_LEVELS.lead;
   const session = await c.env.DB.prepare(
     "SELECT id, paused_at, completed_at, user_id FROM build_sessions WHERE id = ?"
@@ -2074,11 +2074,20 @@ app.post("/api/build/:id/pause", requireAuth(), async (c) => {
   if (session.paused_at) return c.json({ error: "Already paused" }, 400);
 
   const useClientTs = c.req.header("X-Offline-Queued") && body.client_timestamp && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(body.client_timestamp);
-  if (useClientTs) {
-    await c.env.DB.prepare("UPDATE build_sessions SET paused_at = ? WHERE id = ?").bind(body.client_timestamp, id).run();
+  const pausedAtSql = useClientTs ? body.client_timestamp! : null;
+  if (pausedAtSql) {
+    await c.env.DB.prepare("UPDATE build_sessions SET paused_at = ? WHERE id = ?").bind(pausedAtSql, id).run();
   } else {
     await c.env.DB.prepare("UPDATE build_sessions SET paused_at = datetime('now') WHERE id = ?").bind(id).run();
   }
+
+  // Record WHY the build paused (Lean signal). Reason is optional; defaults to "other".
+  const reason = (body.reason || "other").slice(0, 40);
+  const note = body.note ? String(body.note).slice(0, 500) : null;
+  await c.env.DB.prepare(
+    "INSERT INTO pause_events (build_session_id, user_id, reason, note, paused_at) VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')))"
+  ).bind(id, session.user_id, reason, note, pausedAtSql).run();
+
   return c.json({ ok: true });
 });
 
@@ -2103,6 +2112,11 @@ app.post("/api/build/:id/resume", requireAuth(), async (c) => {
   await c.env.DB.prepare(
     "UPDATE build_sessions SET paused_at = NULL, total_paused_seconds = ? WHERE id = ?"
   ).bind(newTotal, id).run();
+
+  // Close the open pause event for this session
+  await c.env.DB.prepare(
+    "UPDATE pause_events SET resumed_at = COALESCE(?, datetime('now')) WHERE build_session_id = ? AND resumed_at IS NULL"
+  ).bind(useClientTs ? body.client_timestamp! : null, id).run();
 
   return c.json({ ok: true, total_paused_seconds: newTotal });
 });
@@ -2132,6 +2146,11 @@ app.post("/api/build/:id/complete", requireAuth(), async (c) => {
   await c.env.DB.prepare(
     "UPDATE build_sessions SET completed_at = ?, paused_at = NULL, total_paused_seconds = ? WHERE id = ?"
   ).bind(completedIso, totalPaused, id).run();
+
+  // Close any pause event left open at completion
+  await c.env.DB.prepare(
+    "UPDATE pause_events SET resumed_at = ? WHERE build_session_id = ? AND resumed_at IS NULL"
+  ).bind(completedIso, id).run();
 
   await c.env.DB.prepare("UPDATE cabinets SET status = 'assembled' WHERE id = ?")
     .bind(session.cabinet_id).run();
