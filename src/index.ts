@@ -1035,52 +1035,44 @@ app.get("/api/kpi/assemblers", requireAuth("lead"), async (c) => {
   const endStation = l3Stations[1]?.slug;
   if (!startStation || !endStation) return c.json({ assemblers: [], start_station: null, end_station: null });
 
+  // Build-timer is the source of truth for the assembly module. avg_minutes is
+  // working time per cabinet (paused time excluded), so "Team Avg" reads as
+  // build time, not assembly→staging dwell.
   const result = await c.env.DB.prepare(
     `SELECT
-       starts.scanned_by as assembler,
+       u.name as assembler,
        COUNT(*) as total_started,
-       COUNT(completes.id) as total_completed,
-       ROUND(AVG(CASE WHEN completes.id IS NOT NULL
-         THEN (julianday(completes.scanned_at) - julianday(starts.scanned_at)) * 1440
+       COUNT(bs.completed_at) as total_completed,
+       ROUND(AVG(CASE WHEN bs.completed_at IS NOT NULL
+         THEN (julianday(bs.completed_at) - julianday(bs.started_at)) * 1440 - bs.total_paused_seconds / 60.0
          END), 1) as avg_minutes,
-       ROUND(MIN(CASE WHEN completes.id IS NOT NULL
-         THEN (julianday(completes.scanned_at) - julianday(starts.scanned_at)) * 1440
+       ROUND(MIN(CASE WHEN bs.completed_at IS NOT NULL
+         THEN (julianday(bs.completed_at) - julianday(bs.started_at)) * 1440 - bs.total_paused_seconds / 60.0
          END), 1) as min_minutes,
-       ROUND(MAX(CASE WHEN completes.id IS NOT NULL
-         THEN (julianday(completes.scanned_at) - julianday(starts.scanned_at)) * 1440
+       ROUND(MAX(CASE WHEN bs.completed_at IS NOT NULL
+         THEN (julianday(bs.completed_at) - julianday(bs.started_at)) * 1440 - bs.total_paused_seconds / 60.0
          END), 1) as max_minutes,
-       COUNT(DISTINCT DATE(starts.scanned_at)) as active_days,
-       ROUND(CAST(COUNT(completes.id) AS REAL) / MAX(COUNT(DISTINCT DATE(starts.scanned_at)), 1), 1) as per_day
-     FROM scans starts
-     LEFT JOIN scans completes
-       ON completes.cabinet_id = starts.cabinet_id
-       AND completes.station = ?
-       AND completes.scanned_at > starts.scanned_at
-     WHERE starts.station = ?
-       AND starts.scanned_by IS NOT NULL
-       AND starts.scanned_by != ''
-       AND starts.scanned_at >= datetime('now', '-' || ? || ' days')
-     GROUP BY starts.scanned_by
+       COUNT(DISTINCT DATE(bs.started_at)) as active_days,
+       ROUND(CAST(COUNT(bs.completed_at) AS REAL) / MAX(COUNT(DISTINCT DATE(bs.started_at)), 1), 1) as per_day
+     FROM build_sessions bs
+     JOIN users u ON bs.user_id = u.id
+     WHERE bs.started_at >= datetime('now', '-' || ? || ' days')
+     GROUP BY bs.user_id
      ORDER BY total_completed DESC`
-  ).bind(endStation, startStation, days).all();
+  ).bind(days).all();
 
   const daily = await c.env.DB.prepare(
     `SELECT
-       starts.scanned_by as assembler,
-       DATE(starts.scanned_at) as day,
-       COUNT(completes.id) as completed
-     FROM scans starts
-     LEFT JOIN scans completes
-       ON completes.cabinet_id = starts.cabinet_id
-       AND completes.station = ?
-       AND completes.scanned_at > starts.scanned_at
-     WHERE starts.station = ?
-       AND starts.scanned_by IS NOT NULL
-       AND starts.scanned_by != ''
-       AND starts.scanned_at >= datetime('now', '-' || ? || ' days')
-     GROUP BY starts.scanned_by, DATE(starts.scanned_at)
+       u.name as assembler,
+       DATE(bs.completed_at) as day,
+       COUNT(*) as completed
+     FROM build_sessions bs
+     JOIN users u ON bs.user_id = u.id
+     WHERE bs.completed_at IS NOT NULL
+       AND bs.completed_at >= datetime('now', '-' || ? || ' days')
+     GROUP BY bs.user_id, DATE(bs.completed_at)
      ORDER BY day ASC`
-  ).bind(endStation, startStation, days).all();
+  ).bind(days).all();
 
   const dailyByAssembler: Record<string, Array<{ day: string; completed: number }>> = {};
   for (const row of daily.results as Array<{ assembler: string; day: string; completed: number }>) {

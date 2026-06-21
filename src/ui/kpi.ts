@@ -159,7 +159,7 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
             summaryDiv.innerHTML =
               '<div class="summary-stat"><div class="val">' + totalCompleted + '</div><div class="lbl">' + LABELS.l3 + 's Completed</div></div>' +
               '<div class="summary-stat"><div class="val">' + assemblers.length + '</div><div class="lbl">Assemblers</div></div>' +
-              '<div class="summary-stat"><div class="val">' + fmtMin(teamAvg) + '</div><div class="lbl">Team Avg Cycle</div></div>' +
+              '<div class="summary-stat"><div class="val">' + fmtMin(teamAvg) + '</div><div class="lbl">Team Avg Build</div></div>' +
               taktStat +
               '<div class="summary-stat"><div class="val ' + fixitColor + '">' + teamFixitRate + '%</div><div class="lbl">Defect Rate</div></div>' +
               '<div class="summary-stat"><div class="val">' + teamFixits + '</div><div class="lbl">FixIts</div></div>' +
