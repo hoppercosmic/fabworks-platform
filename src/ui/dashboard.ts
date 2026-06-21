@@ -225,8 +225,12 @@ export function dashboardPage(config: TenantConfig, user: SessionUser): string {
         var counts = {};
         L3_STATUSES.forEach(function(st) { counts[st] = 0; });
         job.cabinets.forEach(function(c) { counts[c.status] = (counts[c.status] || 0) + 1; });
-        var terminalCount = counts[TERMINAL] || 0;
-        var pct = total > 0 ? Math.round((terminalCount / total) * 100) : 0;
+        // "Done" = cabinets that have finished assembly or moved past it
+        // (the last two L3 stages, e.g. assembled + staged). Counting only the
+        // terminal stage made in-progress jobs read 0% before staging.
+        var doneStatuses = L3_STATUSES.slice(-2);
+        var doneCount = doneStatuses.reduce(function(a, st) { return a + (counts[st] || 0); }, 0);
+        var pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
 
         var statsHtml = L3_STATUSES.map(function(st, i) {
           var dotClass = st === 'pending' ? 'dot-pending' : st === TERMINAL ? 'dot-terminal' : 'dot-active';

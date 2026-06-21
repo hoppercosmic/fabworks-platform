@@ -17,7 +17,7 @@
       "binding": "PHOTOS",
       "bucket_name": "fabworks-photos"
     }
-  ]
+  ],
   // Uncomment and configure routes for a custom domain:
   // "routes": [
   //   { "pattern": "shop.yourdomain.com", "zone_name": "yourdomain.com" },
@@ -25,4 +25,34 @@
   //   { "pattern": "scan.yourdomain.com", "zone_name": "yourdomain.com" },
   //   { "pattern": "scan.yourdomain.com/*", "zone_name": "yourdomain.com" }
   // ]
+
+  // ─── cab1.fabworks.app — standalone Cabinet Assembly demo ───
+  // Fully isolated from the main `fabworks` worker: own Worker, own D1, own R2.
+  // Deploy with:  npx wrangler deploy --env cab1
+  // Before first deploy, create resources and paste the D1 id below:
+  //   npx wrangler d1 create cab1-db        → copy database_id into env.cab1.d1_databases
+  //   npx wrangler r2 bucket create cab1-photos
+  "env": {
+    "cab1": {
+      "name": "cab1",
+      "vars": { "APP_PROFILE": "cab1" },
+      "workers_dev": true,
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "cab1-db",
+          "database_id": "ffe88fec-9242-4fce-9714-c07ff42cbdd3"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "PHOTOS",
+          "bucket_name": "cab1-photos"
+        }
+      ],
+      "routes": [
+        { "pattern": "cab1.fabworks.app", "custom_domain": true }
+      ]
+    }
+  }
 }

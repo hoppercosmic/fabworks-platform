@@ -58,6 +58,14 @@ export function workbenchPage(config: TenantConfig, user: SessionUser): string {
     .fixit-submit { padding: 1rem; font-size: 1rem; font-weight: 600; border: none; border-radius: var(--radius); background: var(--error); color: #fff; cursor: pointer; }
     .fixit-submit:disabled { opacity: 0.5; cursor: default; }
     .fixit-sent { text-align: center; color: var(--success); font-weight: 600; font-size: 1.1rem; padding: 1rem; }
+    .reason-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 200; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 1rem; }
+    .reason-overlay.active { display: flex; }
+    .reason-sheet { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 1rem; }
+    .reason-sheet h2 { color: var(--warning, #f59e0b); font-size: 1.25rem; text-align: center; margin: 0; }
+    .reason-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; }
+    .reason-btn { padding: 16px 12px; border: 2px solid var(--border); border-radius: 10px; background: var(--surface); color: var(--text); font-size: 0.95rem; font-weight: 600; cursor: pointer; text-align: center; transition: all 0.15s; }
+    .reason-btn:active { transform: scale(0.97); }
+    .reason-skip { background: none; border: none; color: var(--muted); font-size: 0.85rem; text-decoration: underline; cursor: pointer; padding: 0.5rem; }
   `, `
     <div id="loading" style="text-align:center;padding:3rem;color:var(--muted);">Loading...</div>
     <div id="no-session" style="display:none">
@@ -94,6 +102,20 @@ export function workbenchPage(config: TenantConfig, user: SessionUser): string {
       </div>
     </div>
     <div id="complete-view" class="card complete-summary" style="display:none"></div>
+    <div class="reason-overlay" id="reason-overlay">
+      <div class="reason-sheet">
+        <h2>Why pause?</h2>
+        <div class="reason-grid">
+          <button class="reason-btn" data-reason="material_wait">Waiting on Material</button>
+          <button class="reason-btn" data-reason="missing_part">Missing Part</button>
+          <button class="reason-btn" data-reason="machine">Machine / Tool</button>
+          <button class="reason-btn" data-reason="help_needed">Need Help</button>
+          <button class="reason-btn" data-reason="break">Break</button>
+          <button class="reason-btn" data-reason="other">Other</button>
+        </div>
+        <button class="reason-skip" id="reason-skip">Just pause →</button>
+      </div>
+    </div>
     <div class="fixit-overlay" id="fixit-overlay">
       <button class="close-btn" id="fixit-close">×</button>
       <div class="fixit-form" id="fixit-form">
@@ -274,35 +296,61 @@ export function workbenchPage(config: TenantConfig, user: SessionUser): string {
       }
     });
 
-    document.getElementById('pause-btn').addEventListener('click', function() {
-      if (!sessionId) return;
-      var action = isPaused ? 'resume' : 'pause';
+    var reasonOverlay = document.getElementById('reason-overlay');
+
+    function doPause(reason) {
       var ts = new Date().toISOString();
-      fetch('/api/build/' + sessionId + '/' + action, {
+      fetch('/api/build/' + sessionId + '/pause', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_timestamp: ts, reason: reason || 'other' }),
+      }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; }); })
+        .then(function(r) {
+          if (!r.ok && r.status !== 202) return;
+          isPaused = true;
+          pausedAtMs = Date.now();
+          document.getElementById('pause-btn').textContent = 'Resume';
+          document.getElementById('pause-btn').classList.add('is-paused');
+          document.getElementById('timer-display').classList.add('paused');
+          document.getElementById('timer-status').textContent = r.status === 202 ? 'Paused (offline)' : 'Paused';
+        });
+    }
+
+    function doResume() {
+      var ts = new Date().toISOString();
+      fetch('/api/build/' + sessionId + '/resume', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ client_timestamp: ts }),
       }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, status: r.status, data: d }; }); })
         .then(function(r) {
           if (!r.ok && r.status !== 202) return;
-          if (action === 'pause') {
-            isPaused = true;
-            pausedAtMs = Date.now();
-            document.getElementById('pause-btn').textContent = 'Resume';
-            document.getElementById('pause-btn').classList.add('is-paused');
-            document.getElementById('timer-display').classList.add('paused');
-            document.getElementById('timer-status').textContent = r.status === 202 ? 'Paused (offline)' : 'Paused';
-          } else {
-            if (r.data.total_paused_seconds != null) totalPausedMs = r.data.total_paused_seconds * 1000;
-            else totalPausedMs += (Date.now() - pausedAtMs);
-            isPaused = false;
-            pausedAtMs = 0;
-            document.getElementById('pause-btn').textContent = 'Pause';
-            document.getElementById('pause-btn').classList.remove('is-paused');
-            document.getElementById('timer-display').classList.remove('paused');
-            document.getElementById('timer-status').textContent = 'Working';
-          }
+          if (r.data.total_paused_seconds != null) totalPausedMs = r.data.total_paused_seconds * 1000;
+          else totalPausedMs += (Date.now() - pausedAtMs);
+          isPaused = false;
+          pausedAtMs = 0;
+          document.getElementById('pause-btn').textContent = 'Pause';
+          document.getElementById('pause-btn').classList.remove('is-paused');
+          document.getElementById('timer-display').classList.remove('paused');
+          document.getElementById('timer-status').textContent = 'Working';
         });
+    }
+
+    document.getElementById('pause-btn').addEventListener('click', function() {
+      if (!sessionId) return;
+      if (isPaused) { doResume(); return; }
+      reasonOverlay.classList.add('active');
+    });
+
+    reasonOverlay.querySelectorAll('.reason-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        reasonOverlay.classList.remove('active');
+        doPause(btn.dataset.reason);
+      });
+    });
+    document.getElementById('reason-skip').addEventListener('click', function() {
+      reasonOverlay.classList.remove('active');
+      doPause('other');
     });
 
     document.getElementById('complete-btn').addEventListener('click', function() {
@@ -364,7 +412,11 @@ export function workbenchPage(config: TenantConfig, user: SessionUser): string {
       if (!sessionId) return;
       fixitCabinetId = currentCabinetId;
       if (!isPaused) {
-        fetch('/api/build/' + sessionId + '/pause', { method: 'POST' })
+        fetch('/api/build/' + sessionId + '/pause', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: 'defect' }),
+        })
           .then(function(r) { return r.json(); })
           .then(function() {
             isPaused = true;
@@ -526,7 +578,7 @@ export function myWorkbenchPage(config: TenantConfig, user: SessionUser): string
   `, `
   <main>
     <div class="greeting">Hey, ${user.name.split(" ")[0]}</div>
-    <div class="today-stat"><span class="count" id="today-count">—</span> ${L3}s completed today</div>
+    <div class="today-stat"><span class="count" id="today-count">—</span> ${L3}s built by the team today</div>
 
     <div id="active-section" style="display:none">
       <div class="section-title">Active Build</div>

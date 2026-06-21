@@ -27,7 +27,11 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
     .kpi-stat .val.purple { color: var(--purple); }
     .kpi-stat .val.error { color: var(--error); }
     .kpi-bar-row { display: flex; align-items: center; gap: 6px; font-size: 0.7rem; color: var(--muted); }
+    .kpi-breakdown-label { font-size: 0.6rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin-top: 10px; margin-bottom: 4px; }
     .kpi-bar-row .day-label { width: 40px; text-align: right; flex-shrink: 0; }
+    .kpi-bar-row .job-label { flex: 0 0 110px; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .kpi-bar-row .count { min-width: 30px; text-align: right; }
+    .kpi-bar-row .job-of { width: 42px; color: var(--muted); }
     .kpi-bar-track { flex: 1; height: 14px; background: var(--bg); border-radius: 3px; overflow: hidden; }
     .kpi-bar-fill { height: 100%; border-radius: 3px; transition: width 0.3s; }
     .kpi-bar-fill.blue { background: var(--accent); }
@@ -45,6 +49,11 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
     .summary-stat .lbl { font-size: 0.65rem; color: var(--muted); text-transform: uppercase; }
     .empty-state { text-align: center; padding: 48px 16px; color: var(--muted); }
     .station-info { font-size: 0.75rem; color: var(--muted); }
+    .team-causes { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; }
+    .team-causes .tc-title { font-size: 0.7rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 8px; }
+    .team-causes .tc-empty { font-size: 0.8rem; color: var(--muted); }
+    .team-causes .cause-bar { height: 10px; }
+    .team-causes .cause-legend { margin-top: 8px; font-size: 0.72rem; }
     .cause-bar { display: flex; height: 6px; border-radius: 3px; overflow: hidden; margin-top: 4px; }
     .cause-bar span { height: 100%; }
     .cause-bar .cnc { background: var(--accent); }
@@ -96,6 +105,7 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
     </div>
     <div id="station-info" class="station-info"></div>
     <div id="summary" class="summary-bar" style="display:none"></div>
+    <div id="team-causes" class="team-causes" style="display:none"></div>
     <div id="kpi-grid" class="kpi-grid"></div>
     <div id="empty" class="empty-state" style="display:none">No assembly data in this time range</div>
   </main>
@@ -124,6 +134,7 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
           if (assemblers.length === 0) {
             gridDiv.innerHTML = '';
             summaryDiv.style.display = 'none';
+            document.getElementById('team-causes').style.display = 'none';
             emptyDiv.style.display = 'block';
             return;
           }
@@ -143,6 +154,21 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
           var teamFixitRate = data.team_fixit_rate || 0;
           var fixitColor = teamFixitRate > 5 ? 'warning' : 'success';
 
+          // Team-level defect cause breakdown (aggregated — more useful than per-person)
+          var tcDiv = document.getElementById('team-causes');
+          var tcb = data.team_fixit_breakdown || {};
+          var tcTotal = (tcb.cnc_error||0) + (tcb.material_defect||0) + (tcb.transit_damage||0) + (tcb.other_cause||0);
+          if (tcTotal > 0) {
+            function tcSeg(n, cls) { return n > 0 ? '<span class="' + cls + '" style="width:' + (n / tcTotal * 100) + '%"></span>' : ''; }
+            function tcLeg(n, cls, label) { return n > 0 ? '<span class="' + cls + '">' + label + ' ' + n + '</span>' : ''; }
+            tcDiv.innerHTML = '<div class="tc-title">Defects by Cause — team (' + tcTotal + ' total · ' + teamFixitRate + '% of builds)</div>' +
+              '<div class="cause-bar">' + tcSeg(tcb.cnc_error,'cnc') + tcSeg(tcb.material_defect,'material') + tcSeg(tcb.transit_damage,'transit') + tcSeg(tcb.other_cause,'other-cause') + '</div>' +
+              '<div class="cause-legend">' + tcLeg(tcb.cnc_error,'cnc','CNC') + tcLeg(tcb.material_defect,'material','Material') + tcLeg(tcb.transit_damage,'transit','Transit') + tcLeg(tcb.other_cause,'other-cause','Other') + '</div>';
+            tcDiv.style.display = 'block';
+          } else {
+            tcDiv.style.display = 'none';
+          }
+
           taktPromise.then(function(taktData) {
             var taktStat = '';
             if (taktData && taktData.stations && taktData.stations.length > 0) {
@@ -159,7 +185,8 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
             summaryDiv.innerHTML =
               '<div class="summary-stat"><div class="val">' + totalCompleted + '</div><div class="lbl">' + LABELS.l3 + 's Completed</div></div>' +
               '<div class="summary-stat"><div class="val">' + assemblers.length + '</div><div class="lbl">Assemblers</div></div>' +
-              '<div class="summary-stat"><div class="val">' + fmtMin(teamAvg) + '</div><div class="lbl">Team Avg Cycle</div></div>' +
+              '<div class="summary-stat"><div class="val">' + (teamAvg && teamAvg > 0 ? Math.round(60 / teamAvg * 10) / 10 : '\\u2014') + '</div><div class="lbl">Team Cab/hr</div></div>' +
+              '<div class="summary-stat"><div class="val">' + fmtMin(teamAvg) + '</div><div class="lbl">Team Avg Build</div></div>' +
               taktStat +
               '<div class="summary-stat"><div class="val ' + fixitColor + '">' + teamFixitRate + '%</div><div class="lbl">Defect Rate</div></div>' +
               '<div class="summary-stat"><div class="val">' + teamFixits + '</div><div class="lbl">FixIts</div></div>' +
@@ -172,6 +199,7 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
           });
 
           var pauseDaily = data.pause_daily || {};
+          var byJob = data.by_job || {};
 
           gridDiv.innerHTML = assemblers.map(function(a, idx) {
             var days7 = (daily[a.assembler] || []).slice(-7);
@@ -189,10 +217,24 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
                 '<span class="count">' + d.completed + '</span>' + pauseLabel + '</div>';
             }).join('');
 
+            var jobs = byJob[a.assembler] || [];
+            var aTotal = a.total_completed || 1;
+            var jobsHtml = jobs.map(function(jb) {
+              // share of THIS assembler's own output — "where their day went"
+              var pct = Math.round((jb.completed / aTotal) * 100);
+              return '<div class="kpi-bar-row">' +
+                '<span class="job-label" title="' + escHtml(jb.job_number + ' ' + jb.job_name) + '">' + escHtml(jb.job_number + ' ' + jb.job_name) + '</span>' +
+                '<div class="kpi-bar-track"><div class="kpi-bar-fill purple" style="width:' + pct + '%"></div></div>' +
+                '<span class="count">' + pct + '%</span>' +
+                '<span class="pause-tag job-of">' + jb.completed + '</span>' +
+                '</div>';
+            }).join('');
+
             var src = a.source || 'estimated';
             var badge = '<span class="source-badge ' + src + '">' + src + '</span>';
             var cycleLabel = src === 'timer' ? 'Avg Work' : 'Avg Cycle';
             var cycleVal = src === 'timer' && a.avg_working_minutes != null ? a.avg_working_minutes : a.avg_minutes;
+            var cabHr = (cycleVal && cycleVal > 0) ? Math.round(60 / cycleVal * 10) / 10 : null;
             var effPct = null;
             if (src === 'timer' && a.avg_working_minutes != null && a.avg_paused_minutes != null) {
               var total = a.avg_working_minutes + a.avg_paused_minutes;
@@ -211,39 +253,23 @@ export function kpiPage(config: TenantConfig, user: SessionUser): string {
             var fixitClass = fixitRate > 5 ? 'warning' : fixitRate > 0 ? '' : 'success';
             var fixitStat = '<div class="kpi-stat"><div class="val ' + fixitClass + '">' + fixitRate + '%</div><div class="lbl">Defect Rate (' + fixitCount + ')</div></div>';
 
-            var causeBar = '';
-            if (a.fixit_breakdown && fixitCount > 0) {
-              var b = a.fixit_breakdown;
-              var causeBarInner =
-                (b.cnc_error > 0 ? '<span class="cnc" style="width:' + (b.cnc_error / fixitCount * 100) + '%"></span>' : '') +
-                (b.material_defect > 0 ? '<span class="material" style="width:' + (b.material_defect / fixitCount * 100) + '%"></span>' : '') +
-                (b.transit_damage > 0 ? '<span class="transit" style="width:' + (b.transit_damage / fixitCount * 100) + '%"></span>' : '') +
-                (b.other_cause > 0 ? '<span class="other-cause" style="width:' + (b.other_cause / fixitCount * 100) + '%"></span>' : '');
-              causeBar = '<div class="cause-bar">' + causeBarInner + '</div>' +
-                '<div class="cause-legend">' +
-                  (b.cnc_error > 0 ? '<span class="cnc">CNC ' + b.cnc_error + '</span>' : '') +
-                  (b.material_defect > 0 ? '<span class="material">Material ' + b.material_defect + '</span>' : '') +
-                  (b.transit_damage > 0 ? '<span class="transit">Transit ' + b.transit_damage + '</span>' : '') +
-                  (b.other_cause > 0 ? '<span class="other-cause">Other ' + b.other_cause + '</span>' : '') +
-                '</div>';
-            }
-
             return '<div class="kpi-card">' +
-              '<div><span class="name">' + a.assembler + '</span> <span class="rank">#' + (idx + 1) + '</span>' + badge + '</div>' +
+              '<div><span class="name">' + a.assembler + '</span>' + badge + '</div>' +
               '<div class="kpi-stats">' +
                 '<div class="kpi-stat"><div class="val success">' + a.total_completed + '</div><div class="lbl">Completed</div></div>' +
                 '<div class="kpi-stat"><div class="val accent">' + a.per_day + '</div><div class="lbl">Per Day</div></div>' +
+                '<div class="kpi-stat"><div class="val accent">' + (cabHr != null ? cabHr : '\\u2014') + '</div><div class="lbl">Cab/hr</div></div>' +
                 '<div class="kpi-stat"><div class="val purple">' + fmtMin(cycleVal) + '</div><div class="lbl">' + cycleLabel + '</div></div>' +
                 (effRow || '') +
                 (pauseRow || '<div class="kpi-stat"><div class="val">' + a.active_days + '</div><div class="lbl">Active Days</div></div>') +
                 fixitStat +
               '</div>' +
-              causeBar +
               '<div class="kpi-timing">' +
                 '<span class="fast">Best: ' + fmtMin(a.min_minutes) + '</span>' +
                 '<span class="slow">Slowest: ' + fmtMin(a.max_minutes) + '</span>' +
               '</div>' +
-              (barsHtml ? '<div>' + barsHtml + '</div>' : '') +
+              (jobsHtml ? '<div class="kpi-breakdown-label">Where their day went (% of their builds)</div><div>' + jobsHtml + '</div>' : '') +
+              (barsHtml ? '<div class="kpi-breakdown-label">By Day (completed · avg pause)</div><div>' + barsHtml + '</div>' : '') +
             '</div>';
           }).join('');
         });

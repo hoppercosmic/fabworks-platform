@@ -1035,57 +1035,69 @@ app.get("/api/kpi/assemblers", requireAuth("lead"), async (c) => {
   const endStation = l3Stations[1]?.slug;
   if (!startStation || !endStation) return c.json({ assemblers: [], start_station: null, end_station: null });
 
+  // Build-timer is the source of truth for the assembly module. avg_minutes is
+  // working time per cabinet (paused time excluded), so "Team Avg" reads as
+  // build time, not assembly→staging dwell.
   const result = await c.env.DB.prepare(
     `SELECT
-       starts.scanned_by as assembler,
+       u.name as assembler,
        COUNT(*) as total_started,
-       COUNT(completes.id) as total_completed,
-       ROUND(AVG(CASE WHEN completes.id IS NOT NULL
-         THEN (julianday(completes.scanned_at) - julianday(starts.scanned_at)) * 1440
+       COUNT(bs.completed_at) as total_completed,
+       ROUND(AVG(CASE WHEN bs.completed_at IS NOT NULL
+         THEN (julianday(bs.completed_at) - julianday(bs.started_at)) * 1440 - bs.total_paused_seconds / 60.0
          END), 1) as avg_minutes,
-       ROUND(MIN(CASE WHEN completes.id IS NOT NULL
-         THEN (julianday(completes.scanned_at) - julianday(starts.scanned_at)) * 1440
+       ROUND(MIN(CASE WHEN bs.completed_at IS NOT NULL
+         THEN (julianday(bs.completed_at) - julianday(bs.started_at)) * 1440 - bs.total_paused_seconds / 60.0
          END), 1) as min_minutes,
-       ROUND(MAX(CASE WHEN completes.id IS NOT NULL
-         THEN (julianday(completes.scanned_at) - julianday(starts.scanned_at)) * 1440
+       ROUND(MAX(CASE WHEN bs.completed_at IS NOT NULL
+         THEN (julianday(bs.completed_at) - julianday(bs.started_at)) * 1440 - bs.total_paused_seconds / 60.0
          END), 1) as max_minutes,
-       COUNT(DISTINCT DATE(starts.scanned_at)) as active_days,
-       ROUND(CAST(COUNT(completes.id) AS REAL) / MAX(COUNT(DISTINCT DATE(starts.scanned_at)), 1), 1) as per_day
-     FROM scans starts
-     LEFT JOIN scans completes
-       ON completes.cabinet_id = starts.cabinet_id
-       AND completes.station = ?
-       AND completes.scanned_at > starts.scanned_at
-     WHERE starts.station = ?
-       AND starts.scanned_by IS NOT NULL
-       AND starts.scanned_by != ''
-       AND starts.scanned_at >= datetime('now', '-' || ? || ' days')
-     GROUP BY starts.scanned_by
+       COUNT(DISTINCT DATE(bs.started_at)) as active_days,
+       ROUND(CAST(COUNT(bs.completed_at) AS REAL) / MAX(COUNT(DISTINCT DATE(bs.started_at)), 1), 1) as per_day
+     FROM build_sessions bs
+     JOIN users u ON bs.user_id = u.id
+     WHERE bs.started_at >= datetime('now', '-' || ? || ' days')
+     GROUP BY bs.user_id
      ORDER BY total_completed DESC`
-  ).bind(endStation, startStation, days).all();
+  ).bind(days).all();
 
   const daily = await c.env.DB.prepare(
     `SELECT
-       starts.scanned_by as assembler,
-       DATE(starts.scanned_at) as day,
-       COUNT(completes.id) as completed
-     FROM scans starts
-     LEFT JOIN scans completes
-       ON completes.cabinet_id = starts.cabinet_id
-       AND completes.station = ?
-       AND completes.scanned_at > starts.scanned_at
-     WHERE starts.station = ?
-       AND starts.scanned_by IS NOT NULL
-       AND starts.scanned_by != ''
-       AND starts.scanned_at >= datetime('now', '-' || ? || ' days')
-     GROUP BY starts.scanned_by, DATE(starts.scanned_at)
+       u.name as assembler,
+       DATE(bs.completed_at) as day,
+       COUNT(*) as completed
+     FROM build_sessions bs
+     JOIN users u ON bs.user_id = u.id
+     WHERE bs.completed_at IS NOT NULL
+       AND bs.completed_at >= datetime('now', '-' || ? || ' days')
+     GROUP BY bs.user_id, DATE(bs.completed_at)
      ORDER BY day ASC`
-  ).bind(endStation, startStation, days).all();
+  ).bind(days).all();
 
   const dailyByAssembler: Record<string, Array<{ day: string; completed: number }>> = {};
   for (const row of daily.results as Array<{ assembler: string; day: string; completed: number }>) {
     if (!dailyByAssembler[row.assembler]) dailyByAssembler[row.assembler] = [];
     dailyByAssembler[row.assembler].push({ day: row.day, completed: row.completed });
+  }
+
+  // Per-assembler breakdown by job (completed builds + avg build minutes)
+  const byJob = await c.env.DB.prepare(
+    `SELECT u.name AS assembler, j.job_number, j.job_name, j.cabinet_count AS job_total,
+       COUNT(*) AS completed,
+       ROUND(AVG((julianday(bs.completed_at) - julianday(bs.started_at)) * 1440 - bs.total_paused_seconds / 60.0), 1) AS avg_minutes
+     FROM build_sessions bs
+     JOIN users u ON bs.user_id = u.id
+     JOIN jobs j ON bs.job_id = j.id
+     WHERE bs.completed_at IS NOT NULL
+       AND bs.completed_at >= datetime('now', '-' || ? || ' days')
+     GROUP BY bs.user_id, bs.job_id
+     ORDER BY completed DESC`
+  ).bind(days).all();
+
+  const jobsByAssembler: Record<string, Array<{ job_number: string; job_name: string; job_total: number; completed: number; avg_minutes: number }>> = {};
+  for (const row of byJob.results as Array<{ assembler: string; job_number: string; job_name: string; job_total: number; completed: number; avg_minutes: number }>) {
+    if (!jobsByAssembler[row.assembler]) jobsByAssembler[row.assembler] = [];
+    jobsByAssembler[row.assembler].push({ job_number: row.job_number, job_name: row.job_name, job_total: row.job_total, completed: row.completed, avg_minutes: row.avg_minutes });
   }
 
   const timerData = await c.env.DB.prepare(
@@ -1162,15 +1174,28 @@ app.get("/api/kpi/assemblers", requireAuth("lead"), async (c) => {
   const totalCompleted = assemblers.reduce((s, a) => s + ((a as Record<string, unknown>).total_completed as number || 0), 0);
   const teamFixitRate = totalCompleted > 0 ? Math.round((totalFixits / totalCompleted) * 1000) / 10 : 0;
 
+  // Team-level defect cause breakdown (more meaningful aggregated than per-person)
+  const teamCause = await c.env.DB.prepare(
+    `SELECT
+       COUNT(CASE WHEN root_cause = 'cnc_error' THEN 1 END) AS cnc_error,
+       COUNT(CASE WHEN root_cause = 'material_defect' THEN 1 END) AS material_defect,
+       COUNT(CASE WHEN root_cause = 'transit_damage' THEN 1 END) AS transit_damage,
+       COUNT(CASE WHEN root_cause = 'other' THEN 1 END) AS other_cause
+     FROM fixit_requests
+     WHERE created_at >= datetime('now', '-' || ? || ' days')`
+  ).bind(days).first<{ cnc_error: number; material_defect: number; transit_damage: number; other_cause: number }>();
+
   return c.json({
     assemblers,
     daily: dailyByAssembler,
+    by_job: jobsByAssembler,
     pause_daily: pauseDailyByAssembler,
     start_station: config.stations.find((s) => s.slug === startStation)?.name,
     end_station: config.stations.find((s) => s.slug === endStation)?.name,
     days,
     team_fixits: totalFixits,
     team_fixit_rate: teamFixitRate,
+    team_fixit_breakdown: teamCause,
   });
 });
 
@@ -1312,18 +1337,22 @@ app.get("/api/kpi/takt", requireAuth("lead"), async (c) => {
 
 app.get("/api/reports/jobs", requireAuth("lead"), async (c) => {
   const config = c.get("config");
-  const terminalStatus = config.l3_terminal_status;
+  // "Done" = assembled or beyond (the last two L3 stages), matching the
+  // dashboard progress. Counting only the terminal stage made finished-but-
+  // not-yet-staged jobs read 0% complete.
+  const doneStatuses = config.l3_statuses.slice(-2);
+  const donePlaceholders = doneStatuses.map(() => "?").join(",");
 
   const jobs = await c.env.DB.prepare(
     `SELECT j.id, j.job_number, j.job_name, j.status, j.cabinet_count,
        COUNT(c.id) as actual_cabinets,
-       COUNT(CASE WHEN c.status = ? THEN 1 END) as completed_count
+       COUNT(CASE WHEN c.status IN (${donePlaceholders}) THEN 1 END) as completed_count
      FROM jobs j
      LEFT JOIN cabinets c ON c.job_id = j.id
      WHERE j.status != 'cancelled'
      GROUP BY j.id
      ORDER BY CASE j.status WHEN 'active' THEN 0 WHEN 'complete' THEN 1 ELSE 2 END, j.job_number`
-  ).bind(terminalStatus).all();
+  ).bind(...doneStatuses).all();
 
   const statusBreakdown = await c.env.DB.prepare(
     `SELECT j.id as job_id, c.status, COUNT(*) as count
@@ -1356,18 +1385,19 @@ app.get("/api/reports/jobs", requireAuth("lead"), async (c) => {
 
 app.get("/api/reports/jobs/csv", requireAuth("lead"), async (c) => {
   const config = c.get("config");
-  const terminalStatus = config.l3_terminal_status;
+  const doneStatuses = config.l3_statuses.slice(-2);
+  const donePlaceholders = doneStatuses.map(() => "?").join(",");
 
   const jobs = await c.env.DB.prepare(
     `SELECT j.job_number, j.job_name, j.status, j.cabinet_count,
        COUNT(c.id) as actual_cabinets,
-       COUNT(CASE WHEN c.status = ? THEN 1 END) as completed_count
+       COUNT(CASE WHEN c.status IN (${donePlaceholders}) THEN 1 END) as completed_count
      FROM jobs j
      LEFT JOIN cabinets c ON c.job_id = j.id
      WHERE j.status != 'cancelled'
      GROUP BY j.id
      ORDER BY j.job_number`
-  ).bind(terminalStatus).all();
+  ).bind(...doneStatuses).all();
 
   const rows = (jobs.results as Array<Record<string, unknown>>).map(j => {
     const total = (j.actual_cabinets as number) || (j.cabinet_count as number) || 0;
@@ -2064,7 +2094,7 @@ app.get("/api/build/:id", requireAuth(), async (c) => {
 app.post("/api/build/:id/pause", requireAuth(), async (c) => {
   const user = c.get("user")!;
   const id = parseInt(c.req.param("id"), 10);
-  const body = await c.req.json().catch(() => ({})) as { client_timestamp?: string };
+  const body = await c.req.json().catch(() => ({})) as { client_timestamp?: string; reason?: string; note?: string };
   const isLead = ROLE_LEVELS[user.role] >= ROLE_LEVELS.lead;
   const session = await c.env.DB.prepare(
     "SELECT id, paused_at, completed_at, user_id FROM build_sessions WHERE id = ?"
@@ -2074,11 +2104,20 @@ app.post("/api/build/:id/pause", requireAuth(), async (c) => {
   if (session.paused_at) return c.json({ error: "Already paused" }, 400);
 
   const useClientTs = c.req.header("X-Offline-Queued") && body.client_timestamp && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(body.client_timestamp);
-  if (useClientTs) {
-    await c.env.DB.prepare("UPDATE build_sessions SET paused_at = ? WHERE id = ?").bind(body.client_timestamp, id).run();
+  const pausedAtSql = useClientTs ? body.client_timestamp! : null;
+  if (pausedAtSql) {
+    await c.env.DB.prepare("UPDATE build_sessions SET paused_at = ? WHERE id = ?").bind(pausedAtSql, id).run();
   } else {
     await c.env.DB.prepare("UPDATE build_sessions SET paused_at = datetime('now') WHERE id = ?").bind(id).run();
   }
+
+  // Record WHY the build paused (Lean signal). Reason is optional; defaults to "other".
+  const reason = (body.reason || "other").slice(0, 40);
+  const note = body.note ? String(body.note).slice(0, 500) : null;
+  await c.env.DB.prepare(
+    "INSERT INTO pause_events (build_session_id, user_id, reason, note, paused_at) VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')))"
+  ).bind(id, session.user_id, reason, note, pausedAtSql).run();
+
   return c.json({ ok: true });
 });
 
@@ -2103,6 +2142,11 @@ app.post("/api/build/:id/resume", requireAuth(), async (c) => {
   await c.env.DB.prepare(
     "UPDATE build_sessions SET paused_at = NULL, total_paused_seconds = ? WHERE id = ?"
   ).bind(newTotal, id).run();
+
+  // Close the open pause event for this session
+  await c.env.DB.prepare(
+    "UPDATE pause_events SET resumed_at = COALESCE(?, datetime('now')) WHERE build_session_id = ? AND resumed_at IS NULL"
+  ).bind(useClientTs ? body.client_timestamp! : null, id).run();
 
   return c.json({ ok: true, total_paused_seconds: newTotal });
 });
@@ -2132,6 +2176,11 @@ app.post("/api/build/:id/complete", requireAuth(), async (c) => {
   await c.env.DB.prepare(
     "UPDATE build_sessions SET completed_at = ?, paused_at = NULL, total_paused_seconds = ? WHERE id = ?"
   ).bind(completedIso, totalPaused, id).run();
+
+  // Close any pause event left open at completion
+  await c.env.DB.prepare(
+    "UPDATE pause_events SET resumed_at = ? WHERE build_session_id = ? AND resumed_at IS NULL"
+  ).bind(completedIso, id).run();
 
   await c.env.DB.prepare("UPDATE cabinets SET status = 'assembled' WHERE id = ?")
     .bind(session.cabinet_id).run();
@@ -2216,9 +2265,10 @@ app.get("/api/my/workbench", requireAuth(), async (c) => {
      LIMIT 10`
   ).bind(user.id).all();
 
+  // Whole-team total for today (not just this user)
   const todayCompleted = await c.env.DB.prepare(
-    "SELECT COUNT(*) as cnt FROM build_sessions WHERE user_id = ? AND completed_at IS NOT NULL AND DATE(completed_at) = DATE('now')"
-  ).bind(user.id).first<{ cnt: number }>();
+    "SELECT COUNT(*) as cnt FROM build_sessions WHERE completed_at IS NOT NULL AND DATE(completed_at) = DATE('now')"
+  ).first<{ cnt: number }>();
 
   return c.json({
     active_session: activeSession || null,
