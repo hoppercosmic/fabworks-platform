@@ -27,23 +27,18 @@ INSERT INTO buckets (job_id, name, cabinet_count, status)
 INSERT INTO buckets (job_id, name, cabinet_count, status)
   SELECT id, 'Nest 3', 4, 'pending' FROM jobs WHERE job_number = '6789';
 
--- Cabinets 1-12, mapped to the three nests, with realistic labels
-INSERT INTO cabinets (job_id, bucket_id, cabinet_number, label, status)
-  SELECT j.id, b.id, n.num, n.label, 'pending'
-  FROM jobs j
-  JOIN (
-    SELECT 1  AS num, 'Base 36" Sink'      AS label, 'Nest 1' AS nest UNION ALL
-    SELECT 2,  'Base 24" 3-Drawer',         'Nest 1' UNION ALL
-    SELECT 3,  'Base 18" Door',             'Nest 1' UNION ALL
-    SELECT 4,  'Base 30" Door',             'Nest 1' UNION ALL
-    SELECT 5,  'Wall 30x36 Double',         'Nest 2' UNION ALL
-    SELECT 6,  'Wall 24x36 Single',         'Nest 2' UNION ALL
-    SELECT 7,  'Wall 30x18 Over-Range',     'Nest 2' UNION ALL
-    SELECT 8,  'Wall 12x36 Single',         'Nest 2' UNION ALL
-    SELECT 9,  'Tall 24x84 Pantry',         'Nest 3' UNION ALL
-    SELECT 10, 'Tall 18x84 Broom',          'Nest 3' UNION ALL
-    SELECT 11, 'Vanity 48" Double',         'Nest 3' UNION ALL
-    SELECT 12, 'Vanity 30" Single',         'Nest 3'
-  ) n
-  JOIN buckets b ON b.job_id = j.id AND b.name = n.nest
-  WHERE j.job_number = '6789';
+-- Cabinets 1-12, mapped to the three nests, with realistic labels.
+-- Plain multi-row VALUES (avoids D1's compound-SELECT limit); bucket_id resolved per row.
+INSERT INTO cabinets (job_id, bucket_id, cabinet_number, label, status) VALUES
+  ((SELECT id FROM jobs WHERE job_number='6789'), (SELECT id FROM buckets WHERE name='Nest 1' AND job_id=(SELECT id FROM jobs WHERE job_number='6789')), 1,  'Base 36" Sink',       'pending'),
+  ((SELECT id FROM jobs WHERE job_number='6789'), (SELECT id FROM buckets WHERE name='Nest 1' AND job_id=(SELECT id FROM jobs WHERE job_number='6789')), 2,  'Base 24" 3-Drawer',   'pending'),
+  ((SELECT id FROM jobs WHERE job_number='6789'), (SELECT id FROM buckets WHERE name='Nest 1' AND job_id=(SELECT id FROM jobs WHERE job_number='6789')), 3,  'Base 18" Door',       'pending'),
+  ((SELECT id FROM jobs WHERE job_number='6789'), (SELECT id FROM buckets WHERE name='Nest 1' AND job_id=(SELECT id FROM jobs WHERE job_number='6789')), 4,  'Base 30" Door',       'pending'),
+  ((SELECT id FROM jobs WHERE job_number='6789'), (SELECT id FROM buckets WHERE name='Nest 2' AND job_id=(SELECT id FROM jobs WHERE job_number='6789')), 5,  'Wall 30x36 Double',   'pending'),
+  ((SELECT id FROM jobs WHERE job_number='6789'), (SELECT id FROM buckets WHERE name='Nest 2' AND job_id=(SELECT id FROM jobs WHERE job_number='6789')), 6,  'Wall 24x36 Single',   'pending'),
+  ((SELECT id FROM jobs WHERE job_number='6789'), (SELECT id FROM buckets WHERE name='Nest 2' AND job_id=(SELECT id FROM jobs WHERE job_number='6789')), 7,  'Wall 30x18 Over-Range','pending'),
+  ((SELECT id FROM jobs WHERE job_number='6789'), (SELECT id FROM buckets WHERE name='Nest 2' AND job_id=(SELECT id FROM jobs WHERE job_number='6789')), 8,  'Wall 12x36 Single',   'pending'),
+  ((SELECT id FROM jobs WHERE job_number='6789'), (SELECT id FROM buckets WHERE name='Nest 3' AND job_id=(SELECT id FROM jobs WHERE job_number='6789')), 9,  'Tall 24x84 Pantry',   'pending'),
+  ((SELECT id FROM jobs WHERE job_number='6789'), (SELECT id FROM buckets WHERE name='Nest 3' AND job_id=(SELECT id FROM jobs WHERE job_number='6789')), 10, 'Tall 18x84 Broom',    'pending'),
+  ((SELECT id FROM jobs WHERE job_number='6789'), (SELECT id FROM buckets WHERE name='Nest 3' AND job_id=(SELECT id FROM jobs WHERE job_number='6789')), 11, 'Vanity 48" Double',   'pending'),
+  ((SELECT id FROM jobs WHERE job_number='6789'), (SELECT id FROM buckets WHERE name='Nest 3' AND job_id=(SELECT id FROM jobs WHERE job_number='6789')), 12, 'Vanity 30" Single',   'pending');
