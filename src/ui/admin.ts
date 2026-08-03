@@ -3,7 +3,7 @@ import { page, SHARED_JS } from "./layout";
 
 export function adminPage(config: TenantConfig, user: SessionUser): string {
   const ROLES: string[] = ["user", "lead", "supervisor", "admin"];
-  const SHOP_TYPES: string[] = ["cabinet", "metal", "wood", "maintenance", "assembly"];
+  const SHOP_TYPES: string[] = ["cabinet", "metal", "wood", "maintenance", "assembly", "electrical", "plumbing"];
   return page("Admin", `
 
     .tabs { display: flex; gap: 0; border-bottom: 2px solid var(--border); }

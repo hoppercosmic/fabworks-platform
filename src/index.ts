@@ -193,6 +193,57 @@ const SHOP_TEMPLATES: Record<string, Omit<TenantConfig, "shop_type">> = {
       { key: "inspection_class", label: "QC Class", type: "select", options: ["Class A (Strict)", "Class B (Standard)", "Class C (Basic)"], group: "Quality" },
     ],
   },
+  electrical: {
+    entity_labels: { l1: "Job", l2: "Panel", l3: "Circuit" },
+    stations: [
+      { slug: "intake", name: "Intake / Site Survey", level: "l1", seq: 1 },
+      { slug: "rough_in", name: "Rough-In", level: "l2", seq: 2 },
+      { slug: "panel_wiring", name: "Panel Wiring", level: "l2", seq: 3 },
+      { slug: "device_install", name: "Device Install", level: "l3", seq: 4, sets_status: "installing" },
+      { slug: "testing", name: "Testing & Megger", level: "l3", seq: 5, sets_status: "tested" },
+      { slug: "inspection", name: "Inspection Signoff", level: "l3", seq: 6, sets_status: "inspected" },
+    ],
+    l3_statuses: ["pending", "installing", "tested", "inspected"],
+    l3_terminal_status: "inspected",
+    station_menus: [
+      { slug: "rough_in", name: "Rough-In", icon: "wrench", station_slugs: ["rough_in", "panel_wiring"], features: ["notes"], minRole: "user" },
+      { slug: "finish", name: "Finish", icon: "cpu", station_slugs: ["device_install", "testing"], features: ["notes"], minRole: "user" },
+      { slug: "inspection", name: "Inspection", icon: "check", station_slugs: ["inspection"], features: ["notes"], minRole: "user" },
+    ],
+    part_properties: [
+      { key: "circuit_number", label: "Circuit #", type: "text", group: "Circuit Info" },
+      { key: "voltage", label: "Voltage", type: "select", options: ["120V", "208V", "240V", "277V", "480V"], group: "Circuit Info" },
+      { key: "amperage", label: "Amperage", type: "select", options: ["15A", "20A", "30A", "50A", "60A", "100A"], group: "Circuit Info" },
+      { key: "wire_gauge", label: "Wire Gauge", type: "select", options: ["14 AWG", "12 AWG", "10 AWG", "8 AWG", "6 AWG", "4 AWG"], group: "Materials" },
+      { key: "conduit_type", label: "Conduit Type", type: "select", options: ["EMT", "PVC", "Rigid", "Flex", "None"], group: "Materials" },
+      { key: "device_type", label: "Device Type", type: "select", options: ["Outlet", "Switch", "Breaker", "Fixture", "Panel"], group: "Devices" },
+    ],
+  },
+  plumbing: {
+    entity_labels: { l1: "Job", l2: "System", l3: "Fixture" },
+    stations: [
+      { slug: "intake", name: "Intake / Site Survey", level: "l1", seq: 1 },
+      { slug: "rough_in", name: "Rough-In", level: "l2", seq: 2 },
+      { slug: "pipe_fitting", name: "Pipe Fitting", level: "l2", seq: 3 },
+      { slug: "fixture_install", name: "Fixture Install", level: "l3", seq: 4, sets_status: "installing" },
+      { slug: "pressure_test", name: "Pressure Test", level: "l3", seq: 5, sets_status: "tested" },
+      { slug: "inspection", name: "Inspection Signoff", level: "l3", seq: 6, sets_status: "inspected" },
+    ],
+    l3_statuses: ["pending", "installing", "tested", "inspected"],
+    l3_terminal_status: "inspected",
+    station_menus: [
+      { slug: "rough_in", name: "Rough-In", icon: "wrench", station_slugs: ["rough_in", "pipe_fitting"], features: ["notes"], minRole: "user" },
+      { slug: "finish", name: "Finish", icon: "cpu", station_slugs: ["fixture_install", "pressure_test"], features: ["notes"], minRole: "user" },
+      { slug: "inspection", name: "Inspection", icon: "check", station_slugs: ["inspection"], features: ["notes"], minRole: "user" },
+    ],
+    part_properties: [
+      { key: "line_number", label: "Line #", type: "text", group: "System Info" },
+      { key: "pipe_material", label: "Pipe Material", type: "select", options: ["Copper", "PEX", "PVC", "CPVC", "Cast Iron", "ABS"], group: "Materials" },
+      { key: "pipe_diameter", label: "Pipe Diameter", type: "select", options: ["1/2 in", "3/4 in", "1 in", "1.5 in", "2 in", "3 in", "4 in"], group: "Materials" },
+      { key: "fixture_type", label: "Fixture Type", type: "select", options: ["Sink", "Toilet", "Water Heater", "Valve", "Drain", "Vent"], group: "Fixtures" },
+      { key: "test_pressure", label: "Test Pressure", type: "text", unit: "psi", group: "Testing" },
+    ],
+  },
 };// --- Config Loading ---
 
 let cachedConfig: TenantConfig | null = null;
