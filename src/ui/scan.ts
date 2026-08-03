@@ -60,6 +60,22 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
     .install-banner-sub { font-size:0.75rem; color:var(--muted); margin-top:2px; }
     .install-banner-btn { flex-shrink:0; padding:8px 14px; background:var(--accent); color:white; border:none; border-radius:8px; font-size:0.8rem; font-weight:700; cursor:pointer; }
     .install-banner-dismiss { flex-shrink:0; background:none; border:none; color:var(--muted); font-size:1.2rem; cursor:pointer; padding:4px; }
+
+    .camera-tools { display: flex; gap: 8px; margin-top: 8px; }
+    .camera-btn { flex: 1; padding: 10px; font-weight: 700; font-size: 0.85rem; border: 1px solid var(--accent); border-radius: 8px; background: rgba(59,130,246,0.1); color: var(--accent); cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; }
+    .camera-modal { position: fixed; inset: 0; background: #000; z-index: 400; display: none; flex-direction: column; }
+    .camera-modal.active { display: flex; }
+    .camera-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; background: #111; color: #fff; font-weight: 700; }
+    .camera-viewport { flex: 1; position: relative; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+    .camera-viewport video { width: 100%; height: 100%; object-fit: cover; }
+    .camera-reticle { position: absolute; width: 220px; height: 220px; border: 2px dashed rgba(59,130,246,0.8); border-radius: 16px; box-shadow: 0 0 0 2000px rgba(0,0,0,0.5); pointer-events: none; }
+    .camera-actions { padding: 16px; background: #111; display: flex; gap: 12px; justify-content: center; }
+    .shutter-btn { width: 64px; height: 64px; border-radius: 50%; border: 4px solid #fff; background: var(--accent); color: white; font-size: 1.5rem; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+    .camera-close { background: none; border: none; color: #fff; font-size: 1.5rem; cursor: pointer; }
+    .defect-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 450; display: none; align-items: center; justify-content: center; padding: 16px; }
+    .defect-modal.active { display: flex; }
+    .defect-card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; width: 100%; max-width: 400px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+
   `, `
   <main>
     <div id="install-banner" style="display:none">
@@ -79,11 +95,57 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
         <div class="station-next" id="station-next"></div>
       </div>
     </div>
+
     <div class="card">
       <label>${config.entity_labels.l1}</label>
       <input type="text" id="job-input" placeholder="${config.entity_labels.l1} number" inputmode="numeric" autocomplete="off">
+      <div class="camera-tools">
+        <button class="camera-btn" id="open-cam-btn">📷 Mobile Scanner & Defect Camera</button>
+      </div>
       <div id="job-info" style="margin-top:8px;font-size:0.85rem;color:var(--muted)"></div>
     </div>
+
+    <!-- Camera Viewfinder Modal -->
+    <div class="camera-modal" id="camera-modal">
+      <div class="camera-header">
+        <span>📷 Mobile Scanner Camera</span>
+        <button class="camera-close" id="close-cam-btn">&times;</button>
+      </div>
+      <div class="camera-viewport">
+        <video id="cam-feed" autoplay playsinline></video>
+        <div class="camera-reticle"></div>
+        <canvas id="cam-canvas" style="display:none"></canvas>
+      </div>
+      <div class="camera-actions">
+        <button class="shutter-btn" id="snap-defect-btn" title="Snapshot Defect Photo">📸</button>
+      </div>
+    </div>
+
+    <!-- Quick Defect Form Modal -->
+    <div class="defect-modal" id="defect-modal">
+      <div class="defect-card">
+        <div style="font-weight:700;font-size:1rem;color:var(--accent)">🤖 Submit Defect Photo for AI QC</div>
+        <img id="defect-preview" style="max-height:160px;border-radius:8px;object-fit:cover">
+        <div>
+          <label class="section-label">Root Cause</label>
+          <select id="defect-cause-select" style="width:100%;padding:8px;border-radius:6px;background:var(--bg);color:var(--text);border:1px solid var(--border)">
+            <option value="cnc_error">CNC / Cutting Error</option>
+            <option value="material_defect">Material / Surface Defect</option>
+            <option value="transit_damage">Transit / Handling Damage</option>
+            <option value="other">Other Shop Issue</option>
+          </select>
+        </div>
+        <div>
+          <label class="section-label">Notes (Optional)</label>
+          <input type="text" id="defect-notes-input" placeholder="Brief detail..." style="width:100%;padding:8px;border-radius:6px;background:var(--bg);color:var(--text);border:1px solid var(--border)">
+        </div>
+        <div style="display:flex;gap:8px;margin-top:4px">
+          <button class="btn" id="cancel-defect-btn" style="flex:1">Cancel</button>
+          <button class="btn btn-primary" id="submit-defect-btn" style="flex:1">Submit to AI QC</button>
+        </div>
+      </div>
+    </div>
+
     <div class="card" id="context-panel">
       <div id="context-label" class="section-label"></div>
       <div class="entity-list" id="entity-list"></div>
@@ -126,6 +188,107 @@ export function scanPage(config: TenantConfig, user: SessionUser): string {
     var entityList = document.getElementById('entity-list');
     var scanBtn = document.getElementById('scan-btn');
     var resultDiv = document.getElementById('result');
+    
+    var openCamBtn = document.getElementById('open-cam-btn');
+    var closeCamBtn = document.getElementById('close-cam-btn');
+    var cameraModal = document.getElementById('camera-modal');
+    var camFeed = document.getElementById('cam-feed');
+    var camCanvas = document.getElementById('cam-canvas');
+    var snapDefectBtn = document.getElementById('snap-defect-btn');
+    var defectModal = document.getElementById('defect-modal');
+    var defectPreview = document.getElementById('defect-preview');
+    var cancelDefectBtn = document.getElementById('cancel-defect-btn');
+    var submitDefectBtn = document.getElementById('submit-defect-btn');
+    var defectCauseSelect = document.getElementById('defect-cause-select');
+    var defectNotesInput = document.getElementById('defect-notes-input');
+    var activeMediaStream = null;
+    var capturedBlob = null;
+
+    if (openCamBtn) {
+      openCamBtn.addEventListener('click', function() {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          alert('Camera access is not supported by your browser.');
+          return;
+        }
+        navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+          .then(function(stream) {
+            activeMediaStream = stream;
+            camFeed.srcObject = stream;
+            cameraModal.classList.add('active');
+          })
+          .catch(function(err) {
+            alert('Unable to access camera: ' + err.message);
+          });
+      });
+    }
+
+    function stopCamera() {
+      if (activeMediaStream) {
+        activeMediaStream.getTracks().forEach(function(t) { t.stop(); });
+        activeMediaStream = null;
+      }
+      cameraModal.classList.remove('active');
+    }
+
+    if (closeCamBtn) closeCamBtn.addEventListener('click', stopCamera);
+
+    if (snapDefectBtn) {
+      snapDefectBtn.addEventListener('click', function() {
+        camCanvas.width = camFeed.videoWidth || 640;
+        camCanvas.height = camFeed.videoHeight || 480;
+        var ctx = camCanvas.getContext('2d');
+        ctx.drawImage(camFeed, 0, 0, camCanvas.width, camCanvas.height);
+        camCanvas.toBlob(function(blob) {
+          capturedBlob = blob;
+          defectPreview.src = URL.createObjectURL(blob);
+          stopCamera();
+          defectModal.classList.add('active');
+        }, 'image/jpeg', 0.85);
+      });
+    }
+
+    if (cancelDefectBtn) {
+      cancelDefectBtn.addEventListener('click', function() {
+        defectModal.classList.remove('active');
+        capturedBlob = null;
+      });
+    }
+
+    if (submitDefectBtn) {
+      submitDefectBtn.addEventListener('click', function() {
+        if (!capturedBlob) return;
+        submitDefectBtn.disabled = true;
+        submitDefectBtn.textContent = 'Submitting...';
+
+        var formData = new FormData();
+        formData.append('cabinet_id', selectedEntityId || 1);
+        formData.append('root_cause', defectCauseSelect.value);
+        if (defectNotesInput.value) formData.append('description', defectNotesInput.value);
+        formData.append('photo', capturedBlob, 'defect-' + Date.now() + '.jpg');
+
+        fetch('/api/fixit', { method: 'POST', body: formData })
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            submitDefectBtn.disabled = false;
+            submitDefectBtn.textContent = 'Submit to AI QC';
+            defectModal.classList.remove('active');
+            capturedBlob = null;
+            if (d.id) {
+              alert('✓ Defect photo submitted! Triggering Gemini Vision AI QC analysis...');
+              fetch('/api/fixit/' + d.id + '/analyze', { method: 'POST' });
+              window.location.href = '/fixit';
+            } else {
+              alert('Submission failed: ' + (d.error || 'Unknown error'));
+            }
+          })
+          .catch(function(err) {
+            submitDefectBtn.disabled = false;
+            submitDefectBtn.textContent = 'Submit to AI QC';
+            alert('Submission error: ' + err.message);
+          });
+      });
+    }
+
     var USER_NAME = ${JSON.stringify(user.name)};
 
     function getStation(slug) {

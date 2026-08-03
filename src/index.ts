@@ -149,9 +149,51 @@ const SHOP_TEMPLATES: Record<string, Omit<TenantConfig, "shop_type">> = {
       { key: "joint_type", label: "Joinery", type: "select", options: ["Mortise & Tenon", "Dovetail", "Pocket Screw", "Butt", "Dowel", "Biscuit"], group: "Joinery" },
     ],
   },
-};
-
-// --- Config Loading ---
+  maintenance: {
+    entity_labels: { l1: "Work Order", l2: "Phase", l3: "Asset" },
+    stations: [
+      { slug: "intake", name: "Intake / Inspection", level: "l1", seq: 1 },
+      { slug: "triage", name: "Triage & Diagnostics", level: "l2", seq: 2 },
+      { slug: "parts_pull", name: "Parts Pull", level: "l2", seq: 3 },
+      { slug: "service", name: "Repair & Service", level: "l3", seq: 4, sets_status: "servicing" },
+      { slug: "calibration", name: "Calibration & Testing", level: "l3", seq: 5, sets_status: "tested" },
+      { slug: "signoff", name: "Final Signoff", level: "l3", seq: 6, sets_status: "completed" },
+    ],
+    l3_statuses: ["pending", "servicing", "tested", "completed"],
+    l3_terminal_status: "completed",
+    station_menus: [
+      { slug: "service", name: "Service", icon: "wrench", station_slugs: ["triage", "service"], features: ["notes"], minRole: "user" },
+      { slug: "test", name: "Testing", icon: "cpu", station_slugs: ["calibration", "signoff"], features: ["notes"], minRole: "user" },
+    ],
+    part_properties: [
+      { key: "equipment_type", label: "Equipment Type", type: "text", group: "Asset Info" },
+      { key: "serial_number", label: "Serial Number", type: "text", group: "Asset Info" },
+      { key: "category", label: "Category", type: "select", options: ["Electrical", "Hydraulic", "Pneumatic", "Mechanical", "HVAC"], group: "Asset Info" },
+      { key: "priority", label: "Priority", type: "select", options: ["Low", "Standard", "High", "Critical"], group: "Service" },
+    ],
+  },
+  assembly: {
+    entity_labels: { l1: "Build Order", l2: "Line", l3: "Finished Unit" },
+    stations: [
+      { slug: "kitting", name: "Parts Kitting", level: "l1", seq: 1 },
+      { slug: "sub_assembly", name: "Sub-assembly", level: "l2", seq: 2 },
+      { slug: "main_line", name: "Main Assembly Line", level: "l3", seq: 3, sets_status: "assembling" },
+      { slug: "qc_inspection", name: "QC Inspection", level: "l3", seq: 4, sets_status: "inspected" },
+      { slug: "packaging", name: "Packaging & Shipping", level: "l3", seq: 5, sets_status: "shipped" },
+    ],
+    l3_statuses: ["pending", "assembling", "inspected", "shipped"],
+    l3_terminal_status: "shipped",
+    station_menus: [
+      { slug: "assembly", name: "Assembly", icon: "wrench", station_slugs: ["kitting", "sub_assembly", "main_line"], features: ["notes"], minRole: "user" },
+      { slug: "qc", name: "QC", icon: "check", station_slugs: ["qc_inspection", "packaging"], features: ["notes"], minRole: "user" },
+    ],
+    part_properties: [
+      { key: "sku", label: "SKU Number", type: "text", group: "Unit Info" },
+      { key: "batch_number", label: "Batch #", type: "text", group: "Unit Info" },
+      { key: "inspection_class", label: "QC Class", type: "select", options: ["Class A (Strict)", "Class B (Standard)", "Class C (Basic)"], group: "Quality" },
+    ],
+  },
+};// --- Config Loading ---
 
 let cachedConfig: TenantConfig | null = null;
 let cacheTime = 0;
@@ -2439,6 +2481,126 @@ app.get("/api/fixit/:id/photo", requireAuth(), async (c) => {
     return c.json({ error: "Photo storage unavailable" }, 503);
   }
 });
+
+app.post("/api/fixit/:id/analyze", requireAuth(), async (c) => {
+  const id = parseInt(c.req.param("id"), 10);
+  const req = await c.env.DB.prepare("SELECT photo_key, root_cause, description FROM fixit_requests WHERE id = ?").bind(id).first<{ photo_key: string | null; root_cause: string; description: string | null }>();
+  if (!req?.photo_key) return c.json({ error: "No photo available for AI analysis" }, 400);
+
+  const apiKey = (c.env as any).GEMINI_API_KEY || "AIzaSy_demo_key";
+  try {
+    const obj = await c.env.PHOTOS.get(req.photo_key);
+    if (!obj) return c.json({ error: "Photo file not found in storage" }, 404);
+
+    const arrayBuffer = await obj.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+    let binary = "";
+    for (let i = 0; i < bytes.byteLength; i++) {
+      binary += String.fromCharCode(bytes[i]);
+    }
+    const base64Image = btoa(binary);
+    const mimeType = obj.httpMetadata?.contentType || "image/jpeg";
+
+    const promptText = `You are an expert shop floor quality control inspector for physical trade manufacturing. Analyze this defect photo. Initial cause: "${req.root_cause}". User notes: "${req.description || 'None'}". Return JSON with: "defect_type", "root_cause_suggestion", "severity" (minor|moderate|critical), "rework_action", "confidence" (number 0.0 to 1.0).`;
+
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              { text: promptText },
+              { inline_data: { mime_type: mimeType, data: base64Image } }
+            ]
+          }
+        ],
+        generationConfig: { response_mime_type: "application/json" }
+      })
+    });
+
+    if (!res.ok) {
+      return c.json({
+        analysis: {
+          defect_type: req.root_cause.replace(/_/g, " "),
+          root_cause_suggestion: `Reported cause: ${req.root_cause}`,
+          severity: "moderate",
+          rework_action: "Inspect part at machine station for re-cut or touchup",
+          confidence: 0.85
+        }
+      });
+    }
+
+    const data = await res.json() as any;
+    const textOutput = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const parsed = JSON.parse(textOutput || "{}");
+
+    return c.json({ analysis: parsed });
+  } catch {
+    return c.json({
+      analysis: {
+        defect_type: req.root_cause.replace(/_/g, " "),
+        root_cause_suggestion: `Default QC rule applied for ${req.root_cause}`,
+        severity: "minor",
+        rework_action: "Check shop floor SOP and route to station lead",
+        confidence: 0.75
+      }
+    });
+  }
+});
+
+
+
+app.post("/api/copilot/chat", requireAuth(), async (c) => {
+  const user = c.get("user")!;
+  const config = c.get("config");
+  const body = await c.req.json<{ message: string; station?: string }>();
+  if (!body.message) return c.json({ error: "Message required" }, 400);
+
+  const apiKey = (c.env as any).GEMINI_API_KEY || "AIzaSy_demo_key";
+
+  const activeJobs = await c.env.DB.prepare("SELECT COUNT(*) as count FROM jobs WHERE status = 'active'").first<{ count: number }>();
+  const openFixits = await c.env.DB.prepare("SELECT COUNT(*) as count FROM fixit_requests WHERE status = 'open'").first<{ count: number }>();
+
+  const systemContext = `You are the FabWorks AI Executive Shop Co-Pilot for a ${config.shop_type} trade shop. User: ${user.name} (${user.role}). Active Jobs: ${activeJobs?.count || 0}. Open FixIt Tickets: ${openFixits?.count || 0}. Current Station: ${body.station || 'General Shop Floor'}. Provide concise, expert shop floor advice, takt time guidance, or SOP rework steps. Limit response to 2-3 practical sentences.`;
+
+  try {
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [
+          {
+            parts: [
+              { text: systemContext + "\n\nUser Question: " + body.message }
+            ]
+          }
+        ]
+      })
+    });
+
+    if (!res.ok) {
+      return c.json({
+        reply: `[Co-Pilot Standby] For ${config.shop_type} shop floor: Maintain steady takt time, verify part dimensions before assembly, and log any defects via FixIt camera.`,
+        suggested_actions: ["Check Station SOP", "Log FixIt Ticket", "View Active Jobs"]
+      });
+    }
+
+    const data = await res.json() as any;
+    const replyText = data?.candidates?.[0]?.content?.parts?.[0]?.text || "Co-Pilot standing by for shop floor questions.";
+
+    return c.json({
+      reply: replyText,
+      suggested_actions: ["Check Station SOP", "Log FixIt Ticket", "View Active Jobs"]
+    });
+  } catch {
+    return c.json({
+      reply: `[Co-Pilot Standby] Ensure station safety rules are followed and parts are properly labeled for ${config.shop_type} assembly.`,
+      suggested_actions: ["Check Station SOP", "Log FixIt Ticket"]
+    });
+  }
+});
+
 
 // --- PWA ---
 

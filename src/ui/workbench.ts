@@ -58,6 +58,17 @@ export function workbenchPage(config: TenantConfig, user: SessionUser): string {
     .fixit-submit { padding: 1rem; font-size: 1rem; font-weight: 600; border: none; border-radius: var(--radius); background: var(--error); color: #fff; cursor: pointer; }
     .fixit-submit:disabled { opacity: 0.5; cursor: default; }
     .fixit-sent { text-align: center; color: var(--success); font-weight: 600; font-size: 1.1rem; padding: 1rem; }
+
+    .copilot-widget { background: var(--surface); border: 1px solid var(--accent); border-radius: 12px; padding: 12px; margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+    .copilot-title { font-weight: 700; font-size: 0.85rem; color: var(--accent); display: flex; justify-content: space-between; align-items: center; }
+    .copilot-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+    .copilot-pill { padding: 4px 8px; font-size: 0.7rem; font-weight: 600; border: 1px solid var(--border); border-radius: 12px; background: var(--bg); color: var(--text); cursor: pointer; }
+    .copilot-pill:hover { border-color: var(--accent); color: var(--accent); }
+    .copilot-box { display: flex; gap: 6px; margin-top: 4px; }
+    .copilot-input { flex: 1; padding: 8px 10px; font-size: 0.8rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); }
+    .copilot-send { padding: 8px 12px; font-size: 0.8rem; font-weight: 700; border: none; border-radius: 8px; background: var(--accent); color: #fff; cursor: pointer; }
+    .copilot-reply { font-size: 0.8rem; color: var(--text); background: rgba(59,130,246,0.08); border-left: 3px solid var(--accent); padding: 8px; border-radius: 4px; display: none; line-height: 1.4; }
+
     .reason-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 200; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 1rem; }
     .reason-overlay.active { display: flex; }
     .reason-sheet { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 1rem; }
@@ -141,6 +152,55 @@ export function workbenchPage(config: TenantConfig, user: SessionUser): string {
   `, `
     ${SHARED_JS}
     ${displayStatusJS(config)}
+
+    
+    window.sendCopilot = function(msg) {
+      var input = document.getElementById('copilot-input');
+      if (input) input.value = msg;
+      triggerCopilotQuery(msg);
+    };
+
+    function triggerCopilotQuery(msg) {
+      var replyDiv = document.getElementById('copilot-reply');
+      var sendBtn = document.getElementById('copilot-send-btn');
+      if (!replyDiv || !msg) return;
+
+      replyDiv.style.display = 'block';
+      replyDiv.textContent = '🤖 Co-Pilot thinking...';
+      if (sendBtn) sendBtn.disabled = true;
+
+      fetch('/api/copilot/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg, station: 'Build Workbench' })
+      })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (sendBtn) sendBtn.disabled = false;
+        replyDiv.textContent = d.reply || 'Co-Pilot standing by.';
+      })
+      .catch(function(err) {
+        if (sendBtn) sendBtn.disabled = false;
+        replyDiv.textContent = 'Co-Pilot error: ' + err.message;
+      });
+    }
+
+    document.addEventListener('DOMContentLoaded', function() {
+      var copilotSendBtn = document.getElementById('copilot-send-btn');
+      var copilotInput = document.getElementById('copilot-input');
+      if (copilotSendBtn && copilotInput) {
+        copilotSendBtn.addEventListener('click', function() {
+          var val = copilotInput.value.trim();
+          if (val) triggerCopilotQuery(val);
+        });
+        copilotInput.addEventListener('keydown', function(e) {
+          if (e.key === 'Enter') {
+            var val = copilotInput.value.trim();
+            if (val) triggerCopilotQuery(val);
+          }
+        });
+      }
+    });
 
     var sessionId = null;
     var currentCabinetId = null;

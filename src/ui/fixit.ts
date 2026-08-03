@@ -34,6 +34,16 @@ export function fixitPage(config: TenantConfig, user: SessionUser): string {
     .empty-state { text-align: center; padding: 3rem 1rem; color: var(--muted); }
     .photo-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 300; display: none; align-items: center; justify-content: center; cursor: pointer; }
     .photo-modal.active { display: flex; }
+
+    .ai-qc-btn { padding: 6px 12px; font-size: 0.8rem; font-weight: 600; border: 1px solid var(--accent); border-radius: 6px; background: rgba(59,130,246,0.1); color: var(--accent); cursor: pointer; margin-top: 4px; display: inline-flex; align-items: center; gap: 4px; }
+    .ai-qc-btn:hover { background: rgba(59,130,246,0.2); }
+    .ai-qc-result { background: rgba(168,85,247,0.1); border: 1px solid rgba(168,85,247,0.3); border-radius: 8px; padding: 10px; margin-top: 8px; font-size: 0.8rem; }
+    .ai-qc-header { display: flex; justify-content: space-between; align-items: center; font-weight: 700; color: var(--purple, #a855f7); margin-bottom: 4px; }
+    .ai-severity { padding: 2px 6px; border-radius: 4px; font-size: 0.65rem; text-transform: uppercase; font-weight: 700; }
+    .sev-minor { background: rgba(34,197,94,0.2); color: var(--success); }
+    .sev-moderate { background: rgba(245,158,11,0.2); color: var(--warning, #f59e0b); }
+    .sev-critical { background: rgba(239,68,68,0.2); color: var(--error); }
+
     .photo-modal img { max-width: 95vw; max-height: 90vh; border-radius: 4px; }
   `, `
   <main>
@@ -57,6 +67,32 @@ export function fixitPage(config: TenantConfig, user: SessionUser): string {
     var emptyDiv = document.getElementById('empty');
     var countSpan = document.getElementById('count');
     var statusSelect = document.getElementById('status-select');
+
+    window.analyzeFixItAI = function(id, btnEl) {
+      btnEl.disabled = true;
+      btnEl.textContent = '🤖 Analyzing Image...';
+      fetch('/api/fixit/' + id + '/analyze', { method: 'POST' })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          btnEl.style.display = 'none';
+          var res = d.analysis || {};
+          var resultDiv = document.getElementById('ai-res-' + id);
+          if (resultDiv) {
+            var sevClass = 'sev-' + (res.severity || 'minor');
+            resultDiv.innerHTML = '<div class="ai-qc-result">' +
+              '<div class="ai-qc-header"><span>🤖 AI QC Inspector Analysis</span><span class="ai-severity ' + sevClass + '">' + (res.severity || 'minor') + '</span></div>' +
+              '<div><strong>Defect Type:</strong> ' + escHtml(res.defect_type || 'General Issue') + '</div>' +
+              '<div><strong>Rework Action:</strong> ' + escHtml(res.rework_action || 'Inspect part at station') + '</div>' +
+              '<div style="font-size:0.7rem;color:var(--muted);margin-top:4px">Confidence: ' + Math.round((res.confidence || 0.8) * 100) + '%</div>' +
+              '</div>';
+          }
+        })
+        .catch(function() {
+          btnEl.disabled = false;
+          btnEl.textContent = '🤖 Retry AI QC Analyze';
+        });
+    };
+
     var photoModal = document.getElementById('photo-modal');
     var photoModalImg = document.getElementById('photo-modal-img');
 
